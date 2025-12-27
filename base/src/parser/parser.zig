@@ -1001,8 +1001,10 @@ pub const Parser = struct {
     fn parseOr(self: *Self) ParseError!*ast.Node {
         var left = try self.parseAnd();
 
+        self.skipWhitespace();
         while (self.check(.or_op)) {
             const op = self.advance().value;
+            self.skipWhitespace();
             const right = try self.parseAnd();
 
             const binary_data = ast.NodeData{
@@ -1027,8 +1029,10 @@ pub const Parser = struct {
     fn parseAnd(self: *Self) ParseError!*ast.Node {
         var left = try self.parseEquality();
 
+        self.skipWhitespace();
         while (self.check(.and_op)) {
             const op = self.advance().value;
+            self.skipWhitespace();
             const right = try self.parseEquality();
 
             const binary_data = ast.NodeData{
@@ -1053,8 +1057,10 @@ pub const Parser = struct {
     fn parseEquality(self: *Self) ParseError!*ast.Node {
         var left = try self.parseComparison();
 
+        self.skipWhitespace();
         while (self.check(.eq) or self.check(.neq)) {
             const op = self.advance().value;
+            self.skipWhitespace();
             const right = try self.parseComparison();
 
             const binary_data = ast.NodeData{
@@ -1079,8 +1085,10 @@ pub const Parser = struct {
     fn parseComparison(self: *Self) ParseError!*ast.Node {
         var left = try self.parseAdditive();
 
+        self.skipWhitespace();
         while (self.check(.lt) or self.check(.gt) or self.check(.lte) or self.check(.gte)) {
             const op = self.advance().value;
+            self.skipWhitespace();
             const right = try self.parseAdditive();
 
             const binary_data = ast.NodeData{
@@ -1105,8 +1113,10 @@ pub const Parser = struct {
     fn parseAdditive(self: *Self) ParseError!*ast.Node {
         var left = try self.parseMultiplicative();
 
+        self.skipWhitespace();
         while (self.check(.plus) or self.check(.minus)) {
             const op = self.advance().value;
+            self.skipWhitespace();
             const right = try self.parseMultiplicative();
 
             const binary_data = ast.NodeData{
@@ -1131,8 +1141,10 @@ pub const Parser = struct {
     fn parseMultiplicative(self: *Self) ParseError!*ast.Node {
         var left = try self.parseUnary();
 
+        self.skipWhitespace();
         while (self.check(.star) or self.check(.slash) or self.check(.percent)) {
             const op = self.advance().value;
+            self.skipWhitespace();
             const right = try self.parseUnary();
 
             const binary_data = ast.NodeData{

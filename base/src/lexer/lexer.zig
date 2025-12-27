@@ -64,7 +64,13 @@ pub const Lexer = struct {
 
         switch (c) {
             '<' => {
-                if (self.match('!')) {
+                if (self.in_mustache) {
+                    if (self.match('=')) {
+                        try self.tokens.append(.{ .type = .lte, .value = "<=", .span = self.makeSpan(start_pos, self.pos) });
+                    } else {
+                        try self.tokens.append(.{ .type = .lt, .value = "<", .span = self.makeSpan(start_pos, self.pos) });
+                    }
+                } else if (self.match('!')) {
                     if (self.match('-') and self.match('-')) {
                         try self.scanComment(start_pos);
                     } else {
@@ -89,13 +95,21 @@ pub const Lexer = struct {
                 }
             },
             '>' => {
-                self.in_tag = false;
-                self.in_closing_tag = false;
-                try self.tokens.append(.{
-                    .type = .rbracket,
-                    .value = ">",
-                    .span = self.makeSpan(start_pos, self.pos),
-                });
+                if (self.in_mustache) {
+                    if (self.match('=')) {
+                        try self.tokens.append(.{ .type = .gte, .value = ">=", .span = self.makeSpan(start_pos, self.pos) });
+                    } else {
+                        try self.tokens.append(.{ .type = .gt, .value = ">", .span = self.makeSpan(start_pos, self.pos) });
+                    }
+                } else {
+                    self.in_tag = false;
+                    self.in_closing_tag = false;
+                    try self.tokens.append(.{
+                        .type = .rbracket,
+                        .value = ">",
+                        .span = self.makeSpan(start_pos, self.pos),
+                    });
+                }
             },
             '/' => {
                 if (self.in_tag and self.peek() == '>') {
