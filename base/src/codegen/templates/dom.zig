@@ -24,12 +24,9 @@ pub const DomTemplate = struct {
     }
 
     pub fn generate(self: *Self, node: *ast.Node) ![]u8 {
-        _ = node;
-        try self.buf.writeLine("import * as $ from 'mms/internal/client';");
+        try self.emitImports();
         try self.buf.writeLine("");
-        try self.buf.writeLine("export default function Component($$anchor, $$props) {");
-        try self.buf.writeLine("  // Component implementation");
-        try self.buf.writeLine("}");
+        try self.emitComponent(node);
         return try self.buf.toOwnedSlice();
     }
 
@@ -37,7 +34,7 @@ pub const DomTemplate = struct {
         try self.buf.writeLine("import * as $ from 'mms/internal/client';");
     }
 
-    fn emitComponent(self: *Self, node: *ast.Node) !void {
+    fn emitComponent(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         try self.buf.writeLine("export default function Component($$anchor, $$props) {");
         self.buf.indent();
 
@@ -56,7 +53,13 @@ pub const DomTemplate = struct {
                     try self.emitNode(child);
                 }
             },
-            .element => try self.emitElement(node),
+            .element => {
+                const name = node.data.element.name;
+                if (std.mem.eql(u8, name, "script") or std.mem.eql(u8, name, "style")) {
+                    return;
+                }
+                try self.emitElement(node);
+            },
             .component => try self.emitComponentUsage(node),
             .text_node => try self.emitText(node),
             .expression_tag => try self.emitExpressionTag(node),
@@ -76,6 +79,8 @@ pub const DomTemplate = struct {
         const id = self.template_count;
         self.template_count += 1;
 
+        const is_void = isVoidElement(element.name);
+
         try self.buf.writeIndent();
         try self.buf.write("var $$t_");
         try self.buf.writeNumber(id);
@@ -88,9 +93,11 @@ pub const DomTemplate = struct {
             }
         }
 
-        if (element.self_closing) {
+        if (is_void) {
             try self.buf.writeLine(" />`);");
         } else {
+            try self.buf.write("></");
+            try self.buf.write(element.name);
             try self.buf.writeLine(">`);");
         }
 
@@ -109,16 +116,25 @@ pub const DomTemplate = struct {
             }
         }
 
-        if (!element.self_closing) {
-            for (element.children.items) |child| {
-                try self.emitNode(child);
-            }
+        for (element.children.items) |child| {
+            try self.emitNode(child);
         }
 
         try self.buf.writeIndent();
         try self.buf.write("$.close($$anchor, $$n_");
         try self.buf.writeNumber(id);
         try self.buf.writeLine(");");
+    }
+
+    fn isVoidElement(name: []const u8) bool {
+        const void_elements = [_][]const u8{
+            "area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr",
+        };
+        for (void_elements) |ve| {
+            if (std.mem.eql(u8, name, ve)) return true;
+        }
+        return false;
     }
 
     fn emitStaticAttribute(self: *Self, node: *ast.Node) !void {
@@ -267,7 +283,7 @@ pub const DomTemplate = struct {
         try self.buf.writeLine("));");
     }
 
-    fn emitIfBlock(self: *Self, node: *ast.Node) !void {
+    fn emitIfBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const if_block = node.data.if_block;
         const id = self.block_count;
         self.block_count += 1;
@@ -297,7 +313,7 @@ pub const DomTemplate = struct {
         _ = id;
     }
 
-    fn emitEachBlock(self: *Self, node: *ast.Node) !void {
+    fn emitEachBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const each = node.data.each_block;
 
         try self.buf.writeIndent();
@@ -332,7 +348,7 @@ pub const DomTemplate = struct {
         try self.buf.writeLine(");");
     }
 
-    fn emitAwaitBlock(self: *Self, node: *ast.Node) !void {
+    fn emitAwaitBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const await_block = node.data.await_block;
 
         try self.buf.writeIndent();
@@ -383,7 +399,7 @@ pub const DomTemplate = struct {
         try self.buf.writeIndentedLine("});");
     }
 
-    fn emitKeyBlock(self: *Self, node: *ast.Node) !void {
+    fn emitKeyBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const key_block = node.data.key_block;
 
         try self.buf.writeIndent();
@@ -400,7 +416,7 @@ pub const DomTemplate = struct {
         try self.buf.writeIndentedLine("});");
     }
 
-    fn emitSnippet(self: *Self, node: *ast.Node) !void {
+    fn emitSnippet(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const snippet = node.data.snippet_block;
 
         try self.buf.writeIndent();

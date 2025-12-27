@@ -47,15 +47,31 @@ pub const Pipeline = struct {
 
     pub fn run(self: *Self) !CompileOutput {
         self.lex() catch {
-            return self.buildOutput("// Lex failed", null, null);
+            try self.ctx.addError("lex-error", "Lexer failed", ast.defaultSpan());
+            return self.buildOutput("", null, null);
         };
 
         self.parse() catch {
-            return self.buildOutput("// Parse failed", null, null);
+            try self.ctx.addError("parse-error", "Parser failed", ast.defaultSpan());
+            return self.buildOutput("", null, null);
         };
 
+        // self.analyze() catch |err| {
+        //     std.debug.print("Analyze error: {}\n", .{err});
+        // };
+
+        // self.validate() catch |err| {
+        //     std.debug.print("Validate error: {}\n", .{err});
+        // };
+
+        if (self.ctx.hasErrors()) {
+            return self.buildOutput("", null, null);
+        }
+
+        // self.transform() catch {};
+
         const emit_result = self.emit() catch {
-            return self.buildOutput("// Emit failed", null, null);
+            return self.buildOutput("", null, null);
         };
 
         return self.buildOutput(emit_result.js, emit_result.css, emit_result.source_map);
