@@ -9,6 +9,7 @@ pub const Lexer = struct {
     tokens: std.ArrayList(ast.Token),
     allocator: std.mem.Allocator,
     in_tag: bool,
+    in_closing_tag: bool,
     in_mustache: bool,
     in_script: bool,
     in_style: bool,
@@ -24,6 +25,7 @@ pub const Lexer = struct {
             .tokens = std.ArrayList(ast.Token).init(allocator),
             .allocator = allocator,
             .in_tag = false,
+            .in_closing_tag = false,
             .in_mustache = false,
             .in_script = false,
             .in_style = false,
@@ -50,12 +52,12 @@ pub const Lexer = struct {
         const start_pos = self.pos;
         const c = self.advance();
 
-        if (self.in_script) {
+        if (self.in_script and !self.in_tag) {
             try self.scanScriptContent(start_pos);
             return;
         }
 
-        if (self.in_style) {
+        if (self.in_style and !self.in_tag) {
             try self.scanStyleContent(start_pos);
             return;
         }
@@ -70,6 +72,7 @@ pub const Lexer = struct {
                     }
                 } else if (self.match('/')) {
                     self.in_tag = true;
+                    self.in_closing_tag = true;
                     try self.tokens.append(.{
                         .type = .close_tag,
                         .value = "</",
@@ -77,6 +80,7 @@ pub const Lexer = struct {
                     });
                 } else {
                     self.in_tag = true;
+                    self.in_closing_tag = false;
                     try self.tokens.append(.{
                         .type = .open_tag,
                         .value = "<",
@@ -86,6 +90,7 @@ pub const Lexer = struct {
             },
             '>' => {
                 self.in_tag = false;
+                self.in_closing_tag = false;
                 try self.tokens.append(.{
                     .type = .rbracket,
                     .value = ">",
@@ -242,8 +247,10 @@ pub const Lexer = struct {
             }
         }
         try self.tokens.append(.{ .type = token_type, .value = value, .span = self.makeSpan(start_pos, self.pos) });
-        if (std.mem.eql(u8, value, "script")) self.in_script = true;
-        if (std.mem.eql(u8, value, "style")) self.in_style = true;
+        if (!self.in_closing_tag) {
+            if (std.mem.eql(u8, value, "script")) self.in_script = true;
+            if (std.mem.eql(u8, value, "style")) self.in_style = true;
+        }
     }
 
     fn identifierType(self: *Self, value: []const u8) ast.TokenType {
@@ -362,12 +369,23 @@ pub const Lexer = struct {
     }
 
     fn scanScriptContent(self: *Self, start_pos: u32) !void {
-        _ = start_pos;
+        const content_start = start_pos;
+        const start_line = self.line;
         while (!self.isAtEnd()) {
             if (self.source[self.pos..].len >= 9) {
                 if (std.mem.eql(u8, self.source[self.pos .. self.pos + 9], "</script>")) {
+                    if (self.pos > content_start) {
+                        try self.tokens.append(.{
+                            .type = .text,
+                            .value = self.source[content_start..self.pos],
+                            .span = .{
+                                .start = .{ .line = start_line, .column = 1, .offset = content_start },
+                                .end = .{ .line = self.line, .column = self.column, .offset = self.pos },
+                            },
+                        });
+                    }
                     self.in_script = false;
-                    break;
+                    return;
                 }
             }
             if (self.peek() == '\n') {
@@ -376,15 +394,38 @@ pub const Lexer = struct {
             }
             _ = self.advance();
         }
+
+        if (self.pos > content_start) {
+            try self.tokens.append(.{
+                .type = .text,
+                .value = self.source[content_start..self.pos],
+                .span = .{
+                    .start = .{ .line = start_line, .column = 1, .offset = content_start },
+                    .end = .{ .line = self.line, .column = self.column, .offset = self.pos },
+                },
+            });
+        }
+        self.in_script = false;
     }
 
     fn scanStyleContent(self: *Self, start_pos: u32) !void {
-        _ = start_pos;
+        const content_start = start_pos;
+        const start_line = self.line;
         while (!self.isAtEnd()) {
             if (self.source[self.pos..].len >= 8) {
                 if (std.mem.eql(u8, self.source[self.pos .. self.pos + 8], "</style>")) {
+                    if (self.pos > content_start) {
+                        try self.tokens.append(.{
+                            .type = .text,
+                            .value = self.source[content_start..self.pos],
+                            .span = .{
+                                .start = .{ .line = start_line, .column = 1, .offset = content_start },
+                                .end = .{ .line = self.line, .column = self.column, .offset = self.pos },
+                            },
+                        });
+                    }
                     self.in_style = false;
-                    break;
+                    return;
                 }
             }
             if (self.peek() == '\n') {

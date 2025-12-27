@@ -45,9 +45,58 @@ pub const Parser = struct {
         var module: ?*ast.Node = null;
         var css: ?*ast.Node = null;
 
+        var filtered_children = std.ArrayList(*ast.Node).init(self.allocator);
+
+        for (fragment.data.fragment.children.items) |child| {
+            if (child.node_type == .element) {
+                const name = child.data.element.name;
+
+                if (std.mem.eql(u8, name, "script")) {
+                    const script_content = self.extractTextContent(child);
+                    const is_module = self.hasModuleAttribute(child);
+
+                    if (is_module) {
+                        const mod_data = ast.NodeData{
+                            .module_script = .{ .content = script_content },
+                        };
+                        module = try ast.createNode(self.allocator, .module_script, child.span, mod_data);
+                    } else {
+                        const script_data = ast.NodeData{
+                            .script = .{
+                                .content = script_content,
+                                .context = .default,
+                            },
+                        };
+                        instance = try ast.createNode(self.allocator, .script, child.span, script_data);
+                    }
+                } else if (std.mem.eql(u8, name, "style")) {
+                    const style_content = self.extractTextContent(child);
+                    const style_data = ast.NodeData{
+                        .style = .{
+                            .content = style_content,
+                            .attributes = child.data.element.attributes,
+                        },
+                    };
+                    css = try ast.createNode(self.allocator, .style, child.span, style_data);
+                } else {
+                    try filtered_children.append(child);
+                }
+            } else {
+                try filtered_children.append(child);
+            }
+        }
+
+        const new_frag_data = ast.NodeData{
+            .fragment = .{
+                .children = filtered_children,
+                .transparent = false,
+            },
+        };
+        const new_fragment = try ast.createNode(self.allocator, .fragment, ast.defaultSpan(), new_frag_data);
+
         const root_data = ast.NodeData{
             .root = .{
-                .fragment = fragment,
+                .fragment = new_fragment,
                 .instance = instance,
                 .module = module,
                 .options = null,
@@ -65,6 +114,33 @@ pub const Parser = struct {
             ast.defaultSpan(),
             root_data,
         );
+    }
+
+    fn extractTextContent(self: *Self, element: *ast.Node) []const u8 {
+        _ = self;
+        for (element.data.element.children.items) |child| {
+            if (child.node_type == .text_node) {
+                return child.data.text_node.data;
+            }
+        }
+        return "";
+    }
+
+    fn hasModuleAttribute(self: *Self, element: *ast.Node) bool {
+        _ = self;
+        for (element.data.element.attributes.items) |attr| {
+            if (attr.node_type == .attribute) {
+                if (std.mem.eql(u8, attr.data.attribute.name, "context")) {
+                    switch (attr.data.attribute.value) {
+                        .text => |text| {
+                            if (std.mem.eql(u8, text, "module")) return true;
+                        },
+                        else => {},
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     fn parseFragment(self: *Self) ParseError!*ast.Node {

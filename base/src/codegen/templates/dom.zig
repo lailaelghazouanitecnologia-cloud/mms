@@ -39,11 +39,35 @@ pub const DomTemplate = struct {
         self.buf.indent();
 
         if (node.node_type == .root) {
-            try self.emitNode(node.data.root.fragment);
+            const root = node.data.root;
+
+            if (root.instance) |script| {
+                try self.emitScriptContent(script);
+                try self.buf.writeLine("");
+            }
+
+            try self.emitNode(root.fragment);
         }
 
         self.buf.dedent();
         try self.buf.writeLine("}");
+    }
+
+    fn emitScriptContent(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        if (node.node_type != .script) return;
+
+        const script = node.data.script;
+        if (script.content.len > 0) {
+            var lines = std.mem.splitSequence(u8, script.content, "\n");
+            while (lines.next()) |line| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (trimmed.len > 0) {
+                    try self.buf.writeIndent();
+                    try self.buf.write(trimmed);
+                    try self.buf.writeLine("");
+                }
+            }
+        }
     }
 
     pub fn emitNode(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
