@@ -486,6 +486,15 @@ pub const Parser = struct {
                 if (self.check(.mustache_close)) {
                     _ = self.advance();
                 }
+            } else if (self.check(.string)) {
+                const str_token = self.advance();
+                const lit_data = ast.NodeData{
+                    .literal_expr = .{
+                        .value = .{ .string = str_token.value },
+                        .raw = str_token.value,
+                    },
+                };
+                expression = try ast.createNode(self.allocator, .literal_expr, str_token.span, lit_data);
             }
         }
 
