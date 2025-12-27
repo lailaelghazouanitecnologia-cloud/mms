@@ -161,8 +161,10 @@ pub const Lexer = struct {
                     } else {
                         try self.tokens.append(.{ .type = .eq, .value = "==", .span = self.makeSpan(start_pos, self.pos) });
                     }
+                } else if (self.match('>')) {
+                    try self.tokens.append(.{ .type = .arrow, .value = "=>", .span = self.makeSpan(start_pos, self.pos) });
                 } else {
-                    try self.tokens.append(.{ .type = .eq, .value = "=", .span = self.makeSpan(start_pos, self.pos) });
+                    try self.tokens.append(.{ .type = .assign, .value = "=", .span = self.makeSpan(start_pos, self.pos) });
                 }
             },
             '!' => {
@@ -188,8 +190,20 @@ pub const Lexer = struct {
                     try self.tokens.append(.{ .type = .pipe, .value = "|", .span = self.makeSpan(start_pos, self.pos) });
                 }
             },
-            '+' => try self.tokens.append(.{ .type = .plus, .value = "+", .span = self.makeSpan(start_pos, self.pos) }),
-            '-' => try self.tokens.append(.{ .type = .minus, .value = "-", .span = self.makeSpan(start_pos, self.pos) }),
+            '+' => {
+                if (self.match('+')) {
+                    try self.tokens.append(.{ .type = .plus_plus, .value = "++", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.tokens.append(.{ .type = .plus, .value = "+", .span = self.makeSpan(start_pos, self.pos) });
+                }
+            },
+            '-' => {
+                if (self.match('-')) {
+                    try self.tokens.append(.{ .type = .minus_minus, .value = "--", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.tokens.append(.{ .type = .minus, .value = "-", .span = self.makeSpan(start_pos, self.pos) });
+                }
+            },
             '*' => try self.tokens.append(.{ .type = .star, .value = "*", .span = self.makeSpan(start_pos, self.pos) }),
             '%' => try self.tokens.append(.{ .type = .percent, .value = "%", .span = self.makeSpan(start_pos, self.pos) }),
             '?' => try self.tokens.append(.{ .type = .question, .value = "?", .span = self.makeSpan(start_pos, self.pos) }),

@@ -208,14 +208,25 @@ pub const DomTemplate = struct {
         const attr = node.data.attribute;
         switch (attr.value) {
             .expression => |expr| {
+                const is_event = std.mem.startsWith(u8, attr.name, "on");
                 try self.buf.writeIndent();
-                try self.buf.write("$.attr($$n_");
-                try self.buf.writeNumber(element_id);
-                try self.buf.write(", \"");
-                try self.buf.write(attr.name);
-                try self.buf.write("\", () => ");
-                try self.emitExpression(expr);
-                try self.buf.writeLine(");");
+                if (is_event) {
+                    try self.buf.write("$.on($$n_");
+                    try self.buf.writeNumber(element_id);
+                    try self.buf.write(", \"");
+                    try self.buf.write(attr.name[2..]);
+                    try self.buf.write("\", ");
+                    try self.emitExpression(expr);
+                    try self.buf.writeLine(");");
+                } else {
+                    try self.buf.write("$.attr($$n_");
+                    try self.buf.writeNumber(element_id);
+                    try self.buf.write(", \"");
+                    try self.buf.write(attr.name);
+                    try self.buf.write("\", () => ");
+                    try self.emitExpression(expr);
+                    try self.buf.writeLine(");");
+                }
             },
             else => {},
         }
@@ -588,6 +599,26 @@ pub const DomTemplate = struct {
                     try self.emitExpression(prop);
                 }
                 try self.buf.write("}");
+            },
+            .arrow_expr => {
+                const arrow = node.data.arrow_expr;
+                try self.buf.write("(");
+                for (arrow.params.items, 0..) |param, i| {
+                    if (i > 0) try self.buf.write(", ");
+                    try self.emitExpression(param);
+                }
+                try self.buf.write(") => ");
+                try self.emitExpression(arrow.body);
+            },
+            .update_expr => {
+                const upd = node.data.update_expr;
+                if (upd.prefix) {
+                    try self.buf.write(upd.operator);
+                    try self.emitExpression(upd.argument);
+                } else {
+                    try self.emitExpression(upd.argument);
+                    try self.buf.write(upd.operator);
+                }
             },
             else => {},
         }

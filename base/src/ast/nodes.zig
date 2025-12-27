@@ -36,8 +36,12 @@ pub const TokenType = enum {
     gt,
     lte,
     gte,
+    assign,
+    arrow,
     plus,
+    plus_plus,
     minus,
+    minus_minus,
     star,
     slash,
     percent,
@@ -138,6 +142,8 @@ pub const NodeType = enum {
     object_expr,
     assignment_expr,
     sequence_expr,
+    arrow_expr,
+    update_expr,
 };
 
 pub const Node = struct {
@@ -196,6 +202,8 @@ pub const NodeData = union(NodeType) {
     object_expr: ObjectExpr,
     assignment_expr: AssignmentExpr,
     sequence_expr: SequenceExpr,
+    arrow_expr: ArrowExpr,
+    update_expr: UpdateExpr,
 };
 
 pub const RootNode = struct {
@@ -494,6 +502,17 @@ pub const AssignmentExpr = struct {
 
 pub const SequenceExpr = struct {
     expressions: std.ArrayList(*Node),
+};
+
+pub const ArrowExpr = struct {
+    params: std.ArrayList(*Node),
+    body: *Node,
+};
+
+pub const UpdateExpr = struct {
+    operator: []const u8,
+    argument: *Node,
+    prefix: bool,
 };
 
 pub fn createNode(allocator: std.mem.Allocator, node_type: NodeType, span: Span, data: NodeData) !*Node {

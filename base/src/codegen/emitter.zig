@@ -46,20 +46,23 @@ pub const Emitter = struct {
             .ssr => try self.ssr_template.generate(self.root),
         };
 
+        const css = self.emitCss();
+
         return EmitResult{
             .js = js,
-            .css = null,
+            .css = css,
             .source_map = null,
         };
     }
 
-    fn emitCss(self: *Self) !?[]const u8 {
+    fn emitCss(self: *Self) ?[]const u8 {
         if (self.root.node_type != .root) return null;
 
         const root = self.root.data.root;
         if (root.css == null) return null;
 
         const style = root.css.?.data.style;
+        if (style.content.len == 0) return null;
         return style.content;
     }
 

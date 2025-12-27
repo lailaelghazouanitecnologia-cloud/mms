@@ -412,7 +412,7 @@ pub const Parser = struct {
         const name = name_token.value;
         var value: ast.AttributeValue = .{ .boolean = true };
 
-        if (self.check(.eq)) {
+        if (self.check(.assign)) {
             _ = self.advance();
 
             self.skipWhitespace();
@@ -476,7 +476,7 @@ pub const Parser = struct {
 
         var expression: ?*ast.Node = null;
 
-        if (self.check(.eq)) {
+        if (self.check(.assign)) {
             _ = self.advance();
             self.skipWhitespace();
 
@@ -1287,6 +1287,21 @@ pub const Parser = struct {
                     ast.defaultSpan(),
                     call_data,
                 );
+            } else if (self.check(.plus_plus) or self.check(.minus_minus)) {
+                const op_token = self.advance();
+                const update_data = ast.NodeData{
+                    .update_expr = .{
+                        .operator = op_token.value,
+                        .argument = expr,
+                        .prefix = false,
+                    },
+                };
+                expr = try ast.createNode(
+                    self.allocator,
+                    .update_expr,
+                    ast.defaultSpan(),
+                    update_data,
+                );
             } else {
                 break;
             }
@@ -1376,12 +1391,75 @@ pub const Parser = struct {
                 );
             },
             .lparen => {
+                const start_span = token.span;
                 _ = self.advance();
-                const expr = try self.parseExpression();
+
+                var params = std.ArrayList(*ast.Node).init(self.allocator);
+                var is_arrow = false;
+
                 if (self.check(.rparen)) {
                     _ = self.advance();
+                    self.skipWhitespace();
+                    if (self.check(.arrow)) {
+                        is_arrow = true;
+                        _ = self.advance();
+                    }
+                } else {
+                    const first_expr = try self.parseExpression();
+                    self.skipWhitespace();
+
+                    if (self.check(.comma)) {
+                        try params.append(first_expr);
+                        while (self.check(.comma)) {
+                            _ = self.advance();
+                            self.skipWhitespace();
+                            const param = try self.parseExpression();
+                            try params.append(param);
+                            self.skipWhitespace();
+                        }
+                        if (self.check(.rparen)) {
+                            _ = self.advance();
+                            self.skipWhitespace();
+                            if (self.check(.arrow)) {
+                                is_arrow = true;
+                                _ = self.advance();
+                            }
+                        }
+                    } else if (self.check(.rparen)) {
+                        _ = self.advance();
+                        self.skipWhitespace();
+                        if (self.check(.arrow)) {
+                            is_arrow = true;
+                            _ = self.advance();
+                            try params.append(first_expr);
+                        } else {
+                            return first_expr;
+                        }
+                    } else {
+                        return first_expr;
+                    }
                 }
-                return expr;
+
+                if (is_arrow) {
+                    self.skipWhitespace();
+                    const body = try self.parseExpression();
+                    const arrow_data = ast.NodeData{
+                        .arrow_expr = .{
+                            .params = params,
+                            .body = body,
+                        },
+                    };
+                    return ast.createNode(self.allocator, .arrow_expr, start_span, arrow_data);
+                }
+
+                if (params.items.len == 1) {
+                    return params.items[0];
+                }
+
+                const id_data = ast.NodeData{
+                    .identifier_expr = .{ .name = "" },
+                };
+                return ast.createNode(self.allocator, .identifier_expr, ast.defaultSpan(), id_data);
             },
             .lbracket => {
                 return try self.parseArrayExpression();

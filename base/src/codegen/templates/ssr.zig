@@ -78,6 +78,7 @@ pub const SsrTemplate = struct {
         for (element.attributes.items) |attr| {
             if (attr.node_type == .attribute) {
                 const a = attr.data.attribute;
+                if (std.mem.startsWith(u8, a.name, "on")) continue;
                 switch (a.value) {
                     .text => |text| {
                         try self.buf.write(" ");
@@ -86,10 +87,11 @@ pub const SsrTemplate = struct {
                         try self.buf.write(text);
                         try self.buf.write("\"");
                     },
-                    .expression => {
+                    .expression => |expr| {
                         try self.buf.write(" ");
                         try self.buf.write(a.name);
                         try self.buf.write("=\"${$.escape(");
+                        try self.emitExpression(expr);
                         try self.buf.write(")}\"");
                     },
                     .boolean => |val| {
@@ -218,6 +220,26 @@ pub const SsrTemplate = struct {
                 try self.buf.write(" ");
                 try self.emitExpression(b.right);
                 try self.buf.write(")");
+            },
+            .arrow_expr => {
+                const arrow = node.data.arrow_expr;
+                try self.buf.write("(");
+                for (arrow.params.items, 0..) |param, i| {
+                    if (i > 0) try self.buf.write(", ");
+                    try self.emitExpression(param);
+                }
+                try self.buf.write(") => ");
+                try self.emitExpression(arrow.body);
+            },
+            .update_expr => {
+                const upd = node.data.update_expr;
+                if (upd.prefix) {
+                    try self.buf.write(upd.operator);
+                    try self.emitExpression(upd.argument);
+                } else {
+                    try self.emitExpression(upd.argument);
+                    try self.buf.write(upd.operator);
+                }
             },
             else => {},
         }

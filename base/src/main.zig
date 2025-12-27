@@ -176,9 +176,24 @@ fn compileFile(base_allocator: std.mem.Allocator, filename: []const u8, cli_opti
             return;
         };
         std.debug.print("Compiled to {s}\n", .{output_file});
+
+        if (result.css) |css| {
+            const css_file = std.fmt.allocPrint(allocator, "{s}.css", .{output_file}) catch return;
+            const css_out = std.fs.cwd().createFile(css_file, .{}) catch |err| {
+                std.debug.print("Error creating CSS file: {}\n", .{err});
+                return;
+            };
+            defer css_out.close();
+            css_out.writeAll(css) catch {};
+            std.debug.print("CSS written to {s}\n", .{css_file});
+        }
     } else {
         const stdout = std.io.getStdOut().writer();
         stdout.writeAll(result.js) catch {};
+        if (result.css) |css| {
+            stdout.writeAll("\n/* --- CSS --- */\n") catch {};
+            stdout.writeAll(css) catch {};
+        }
     }
 }
 
