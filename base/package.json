@@ -1,0 +1,10 @@
+{
+  "name": "mms-compiler",
+  "version": "0.3.0",
+  "type": "module",
+  "scripts": {
+    "build": "zig build",
+    "test": "zig build test",
+    "clean": "rm -rf zig-out zig-cache"
+  }
+}
