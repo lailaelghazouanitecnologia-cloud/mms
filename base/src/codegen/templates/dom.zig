@@ -248,6 +248,15 @@ pub const DomTemplate = struct {
                 } else {
                     try self.buf.write("() => {}");
                 }
+                if (dir.modifiers.items.len > 0) {
+                    try self.buf.write(", { ");
+                    for (dir.modifiers.items, 0..) |mod, i| {
+                        if (i > 0) try self.buf.write(", ");
+                        try self.buf.write(mod);
+                        try self.buf.write(": true");
+                    }
+                    try self.buf.write(" }");
+                }
                 try self.buf.writeLine(");");
             },
             .bind => {
@@ -276,6 +285,44 @@ pub const DomTemplate = struct {
                     try self.emitExpression(expr);
                 } else {
                     try self.buf.write("true");
+                }
+                try self.buf.writeLine(");");
+            },
+            .style_directive => {
+                try self.buf.writeIndent();
+                try self.buf.write("$.set_style($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.buf.write(", \"");
+                try self.buf.write(dir.name);
+                try self.buf.write("\", () => ");
+                if (dir.expression) |expr| {
+                    try self.emitExpression(expr);
+                } else {
+                    try self.buf.write("\"\"");
+                }
+                try self.buf.writeLine(");");
+            },
+            .use => {
+                try self.buf.writeIndent();
+                try self.buf.write("$.action($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.buf.write(", ");
+                try self.buf.write(dir.name);
+                if (dir.expression) |expr| {
+                    try self.buf.write(", ");
+                    try self.emitExpression(expr);
+                }
+                try self.buf.writeLine(");");
+            },
+            .transition => {
+                try self.buf.writeIndent();
+                try self.buf.write("$.transition($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.buf.write(", ");
+                try self.buf.write(dir.name);
+                if (dir.expression) |expr| {
+                    try self.buf.write(", ");
+                    try self.emitExpression(expr);
                 }
                 try self.buf.writeLine(");");
             },
