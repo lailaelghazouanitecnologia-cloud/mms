@@ -243,6 +243,7 @@ pub const Parser = struct {
         const name = name_token.value;
         const is_component = isUpperCase(name[0]);
         const is_svelte_element = std.mem.startsWith(u8, name, "svelte:");
+        const is_slot = std.mem.eql(u8, name, "slot");
 
         var attributes = std.ArrayList(*ast.Node).init(self.allocator);
         var children = std.ArrayList(*ast.Node).init(self.allocator);
@@ -287,6 +288,32 @@ pub const Parser = struct {
 
         if (is_svelte_element) {
             return try self.createSvelteElement(name, attributes, children);
+        } else if (is_slot) {
+            var slot_name: []const u8 = "default";
+            for (attributes.items) |attr| {
+                if (attr.node_type == .attribute) {
+                    const a = attr.data.attribute;
+                    if (std.mem.eql(u8, a.name, "name")) {
+                        switch (a.value) {
+                            .text => |t| slot_name = t,
+                            else => {},
+                        }
+                    }
+                }
+            }
+            const slot_data = ast.NodeData{
+                .slot = .{
+                    .name = slot_name,
+                    .attributes = attributes,
+                    .children = children,
+                },
+            };
+            return ast.createNode(
+                self.allocator,
+                .slot,
+                ast.defaultSpan(),
+                slot_data,
+            );
         } else if (is_component) {
             const component_data = ast.NodeData{
                 .component = .{
@@ -718,6 +745,10 @@ pub const Parser = struct {
                 _ = self.advance();
             }
             catch_node = try self.parseFragment();
+        }
+
+        if (self.check(.block_close)) {
+            _ = self.advance();
         }
 
         const await_data = ast.NodeData{

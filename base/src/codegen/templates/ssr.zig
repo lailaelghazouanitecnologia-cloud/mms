@@ -20,19 +20,46 @@ pub const SsrTemplate = struct {
     }
 
     pub fn generate(self: *Self, node: *ast.Node) ![]u8 {
-        try self.emitImports();
+        try self.buf.writeLine("import * as $ from 'mms/internal/server';");
+
+        if (node.node_type == .root) {
+            const root = node.data.root;
+            if (root.instance) |script| {
+                try self.emitModuleLevelImports(script);
+            }
+        }
+
         try self.buf.writeLine("");
         try self.emitComponent(node);
         return try self.buf.toOwnedSlice();
     }
 
-    fn emitImports(self: *Self) !void {
-        try self.buf.writeLine("import * as $ from 'mms/internal/server';");
+    fn emitModuleLevelImports(self: *Self, node: *ast.Node) !void {
+        if (node.node_type != .script) return;
+
+        const script = node.data.script;
+        if (script.content.len > 0) {
+            var lines = std.mem.splitSequence(u8, script.content, "\n");
+            while (lines.next()) |line| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.startsWith(u8, trimmed, "import ")) {
+                    try self.buf.write(trimmed);
+                    try self.buf.writeLine("");
+                }
+            }
+        }
     }
 
     fn emitComponent(self: *Self, node: *ast.Node) !void {
         try self.buf.writeLine("export default function Component($$payload, $$props) {");
         self.buf.indent();
+
+        if (node.node_type == .root) {
+            const root = node.data.root;
+            if (root.instance) |script| {
+                try self.emitScriptContent(script);
+            }
+        }
 
         try self.buf.writeIndent();
         try self.buf.write("$$payload.out += `");
@@ -47,6 +74,64 @@ pub const SsrTemplate = struct {
         try self.buf.writeLine("}");
     }
 
+    fn emitScriptContent(self: *Self, node: *ast.Node) !void {
+        if (node.node_type != .script) return;
+
+        const script = node.data.script;
+        if (script.content.len > 0) {
+            var lines = std.mem.splitSequence(u8, script.content, "\n");
+            while (lines.next()) |line| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "import ")) {
+                    try self.buf.writeIndent();
+                    try self.emitTransformedLine(trimmed);
+                    try self.buf.writeLine("");
+                }
+            }
+        }
+    }
+
+    fn emitTransformedLine(self: *Self, line: []const u8) !void {
+        if (std.mem.indexOf(u8, line, "$props()")) |idx| {
+            try self.buf.write(line[0..idx]);
+            try self.buf.write("$$props");
+            const after_props = idx + 8;
+            if (after_props < line.len) {
+                try self.buf.write(line[after_props..]);
+            }
+        } else if (std.mem.indexOf(u8, line, "$state(")) |idx| {
+            try self.buf.write(line[0..idx]);
+            const after_state = idx + 7;
+            if (after_state < line.len) {
+                if (std.mem.lastIndexOf(u8, line, ");")) |close_idx| {
+                    try self.buf.write(line[after_state..close_idx]);
+                    try self.buf.write(";");
+                } else {
+                    try self.buf.write(line[after_state..]);
+                }
+            }
+        } else if (std.mem.indexOf(u8, line, "$derived(")) |idx| {
+            try self.buf.write(line[0..idx]);
+            const after = idx + 9;
+            if (after < line.len) {
+                if (std.mem.lastIndexOf(u8, line, ");")) |close_idx| {
+                    try self.buf.write(line[after..close_idx]);
+                    try self.buf.write(";");
+                } else {
+                    try self.buf.write(line[after..]);
+                }
+            }
+        } else if (std.mem.startsWith(u8, line, "$effect(")) {
+            return;
+        } else if (std.mem.indexOf(u8, line, "$effect(") != null) {
+            return;
+        } else if (std.mem.startsWith(u8, line, "});")) {
+            return;
+        } else {
+            try self.buf.write(line);
+        }
+    }
+
     fn emitTemplate(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         switch (node.node_type) {
             .fragment => {
@@ -55,6 +140,8 @@ pub const SsrTemplate = struct {
                 }
             },
             .element => try self.emitElement(node),
+            .component => try self.emitComponentUsage(node),
+            .slot => try self.emitSlot(node),
             .text_node => try self.emitText(node),
             .expression_tag => try self.emitExpressionTag(node),
             .if_block => try self.emitIfBlock(node),
@@ -63,6 +150,74 @@ pub const SsrTemplate = struct {
             .html_tag => try self.emitHtmlTag(node),
             else => {},
         }
+    }
+
+    fn emitComponentUsage(self: *Self, node: *ast.Node) !void {
+        const comp = node.data.component;
+        try self.buf.write("`;\n");
+        try self.buf.writeIndent();
+        try self.buf.write(comp.name);
+        try self.buf.write("($$payload, {");
+
+        var first = true;
+        for (comp.attributes.items) |attr| {
+            if (attr.node_type == .attribute) {
+                if (!first) try self.buf.write(", ");
+                first = false;
+                try self.buf.write(attr.data.attribute.name);
+                try self.buf.write(": ");
+                switch (attr.data.attribute.value) {
+                    .text => |text| {
+                        try self.buf.write("\"");
+                        try self.buf.write(text);
+                        try self.buf.write("\"");
+                    },
+                    .expression => |expr| try self.emitExpression(expr),
+                    .boolean => |val| try self.buf.write(if (val) "true" else "false"),
+                    else => {},
+                }
+            }
+        }
+
+        if (comp.children.items.len > 0) {
+            if (!first) try self.buf.write(", ");
+            try self.buf.write("children: ($$payload) => { $$payload.out += `");
+            for (comp.children.items) |child| {
+                try self.emitTemplate(child);
+            }
+            try self.buf.write("`; }");
+        }
+
+        try self.buf.writeLine("});");
+        try self.buf.writeIndent();
+        try self.buf.write("$$payload.out += `");
+    }
+
+    fn emitSlot(self: *Self, node: *ast.Node) !void {
+        const slot = node.data.slot;
+        const slot_name = if (slot.name.len > 0) slot.name else "default";
+
+        try self.buf.write("`;\n");
+        try self.buf.writeIndent();
+        try self.buf.write("if ($$props.");
+        if (std.mem.eql(u8, slot_name, "default")) {
+            try self.buf.write("children");
+        } else {
+            try self.buf.write(slot_name);
+        }
+        try self.buf.write(") { $$props.");
+        if (std.mem.eql(u8, slot_name, "default")) {
+            try self.buf.write("children");
+        } else {
+            try self.buf.write(slot_name);
+        }
+        try self.buf.write("($$payload); } else { $$payload.out += `");
+        for (slot.children.items) |child| {
+            try self.emitTemplate(child);
+        }
+        try self.buf.writeLine("`; }");
+        try self.buf.writeIndent();
+        try self.buf.write("$$payload.out += `");
     }
 
     fn emitElement(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
@@ -77,10 +232,15 @@ pub const SsrTemplate = struct {
         try self.buf.write("<");
         try self.buf.write(element.name);
 
+        var has_class_attr = false;
+        var class_directives = std.ArrayList(*ast.Node).init(self.allocator);
+        defer class_directives.deinit();
+
         for (element.attributes.items) |attr| {
             if (attr.node_type == .attribute) {
                 const a = attr.data.attribute;
                 if (std.mem.startsWith(u8, a.name, "on")) continue;
+                if (std.mem.eql(u8, a.name, "class")) has_class_attr = true;
                 switch (a.value) {
                     .text => |text| {
                         try self.buf.write(" ");
@@ -104,6 +264,43 @@ pub const SsrTemplate = struct {
                     },
                     else => {},
                 }
+            } else if (attr.node_type == .directive) {
+                const dir = attr.data.directive;
+                if (dir.directive_type == .class_directive) {
+                    try class_directives.append(attr);
+                } else if (dir.directive_type == .style_directive) {
+                    try self.buf.write(" style=\"");
+                    try self.buf.write(dir.name);
+                    try self.buf.write(": ${");
+                    if (dir.expression) |expr| {
+                        try self.emitExpression(expr);
+                    }
+                    try self.buf.write("}\"");
+                }
+            }
+        }
+
+        if (class_directives.items.len > 0) {
+            if (!has_class_attr) {
+                try self.buf.write(" class=\"");
+            }
+            try self.buf.write("${[");
+            for (class_directives.items, 0..) |dir_node, i| {
+                if (i > 0) try self.buf.write(", ");
+                const dir = dir_node.data.directive;
+                try self.buf.write("[\"");
+                try self.buf.write(dir.name);
+                try self.buf.write("\", ");
+                if (dir.expression) |expr| {
+                    try self.emitExpression(expr);
+                } else {
+                    try self.buf.write("true");
+                }
+                try self.buf.write("]");
+            }
+            try self.buf.write("].filter(([,v]) => v).map(([k]) => k).join(' ')}");
+            if (!has_class_attr) {
+                try self.buf.write("\"");
             }
         }
 

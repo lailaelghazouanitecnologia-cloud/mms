@@ -24,14 +24,34 @@ pub const DomTemplate = struct {
     }
 
     pub fn generate(self: *Self, node: *ast.Node) ![]u8 {
-        try self.emitImports();
+        try self.buf.writeLine("import * as $ from 'mms/internal/client';");
+
+        if (node.node_type == .root) {
+            const root = node.data.root;
+            if (root.instance) |script| {
+                try self.emitModuleLevelImports(script);
+            }
+        }
+
         try self.buf.writeLine("");
         try self.emitComponent(node);
         return try self.buf.toOwnedSlice();
     }
 
-    fn emitImports(self: *Self) !void {
-        try self.buf.writeLine("import * as $ from 'mms/internal/client';");
+    fn emitModuleLevelImports(self: *Self, node: *ast.Node) !void {
+        if (node.node_type != .script) return;
+
+        const script = node.data.script;
+        if (script.content.len > 0) {
+            var lines = std.mem.splitSequence(u8, script.content, "\n");
+            while (lines.next()) |line| {
+                const trimmed = std.mem.trim(u8, line, " \t");
+                if (std.mem.startsWith(u8, trimmed, "import ")) {
+                    try self.buf.write(trimmed);
+                    try self.buf.writeLine("");
+                }
+            }
+        }
     }
 
     fn emitComponent(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
@@ -61,12 +81,50 @@ pub const DomTemplate = struct {
             var lines = std.mem.splitSequence(u8, script.content, "\n");
             while (lines.next()) |line| {
                 const trimmed = std.mem.trim(u8, line, " \t");
-                if (trimmed.len > 0) {
+                if (trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "import ")) {
                     try self.buf.writeIndent();
-                    try self.buf.write(trimmed);
+                    try self.emitTransformedLine(trimmed);
                     try self.buf.writeLine("");
                 }
             }
+        }
+    }
+
+    fn emitTransformedLine(self: *Self, line: []const u8) !void {
+        if (std.mem.indexOf(u8, line, "$props()")) |idx| {
+            try self.buf.write(line[0..idx]);
+            try self.buf.write("$$props");
+            const after_props = idx + 8;
+            if (after_props < line.len) {
+                try self.buf.write(line[after_props..]);
+            }
+        } else if (std.mem.indexOf(u8, line, "$state(")) |idx| {
+            try self.buf.write(line[0..idx]);
+            try self.buf.write("$.state(");
+            const after_state = idx + 7;
+            if (after_state < line.len) {
+                try self.buf.write(line[after_state..]);
+            }
+        } else if (std.mem.indexOf(u8, line, "$derived(")) |idx| {
+            try self.buf.write(line[0..idx]);
+            try self.buf.write("$.derived(() => ");
+            if (std.mem.indexOf(u8, line[idx + 9 ..], ")")) |end_idx| {
+                try self.buf.write(line[idx + 9 .. idx + 9 + end_idx]);
+                try self.buf.write(")");
+                const after = idx + 9 + end_idx + 1;
+                if (after < line.len) {
+                    try self.buf.write(line[after..]);
+                }
+            } else {
+                try self.buf.write(line[idx + 9 ..]);
+            }
+        } else if (std.mem.indexOf(u8, line, "$effect(")) |_| {
+            try self.buf.write("$.effect(");
+            if (std.mem.indexOf(u8, line, "$effect(")) |idx| {
+                try self.buf.write(line[idx + 8 ..]);
+            }
+        } else {
+            try self.buf.write(line);
         }
     }
 
@@ -85,6 +143,7 @@ pub const DomTemplate = struct {
                 try self.emitElement(node);
             },
             .component => try self.emitComponentUsage(node),
+            .slot => try self.emitSlot(node),
             .text_node => try self.emitText(node),
             .expression_tag => try self.emitExpressionTag(node),
             .if_block => try self.emitIfBlock(node),
@@ -344,6 +403,7 @@ pub const DomTemplate = struct {
 
     fn emitComponentUsage(self: *Self, node: *ast.Node) !void {
         const comp = node.data.component;
+        const has_children = comp.children.items.len > 0;
 
         try self.buf.writeIndent();
         try self.buf.write(comp.name);
@@ -366,10 +426,52 @@ pub const DomTemplate = struct {
                     .boolean => |val| try self.buf.write(if (val) "true" else "false"),
                     else => {},
                 }
+            } else if (attr.node_type == .spread_attribute) {
+                if (!first) try self.buf.write(", ");
+                first = false;
+                try self.buf.write("...");
+                try self.emitExpression(attr.data.spread_attribute.expression);
             }
         }
 
+        if (has_children) {
+            if (!first) try self.buf.write(", ");
+            try self.buf.write("children: ($$anchor) => {");
+            try self.buf.writeLine("");
+            self.buf.indent();
+            for (comp.children.items) |child| {
+                try self.emitNode(child);
+            }
+            self.buf.dedent();
+            try self.buf.writeIndent();
+            try self.buf.write("}");
+        }
+
         try self.buf.writeLine("});");
+    }
+
+    fn emitSlot(self: *Self, node: *ast.Node) !void {
+        const slot = node.data.slot;
+        const slot_name = if (slot.name.len > 0) slot.name else "default";
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.slot($$anchor, $$props, \"");
+        try self.buf.write(slot_name);
+        try self.buf.write("\"");
+
+        if (slot.children.items.len > 0) {
+            try self.buf.write(", ($$anchor) => {");
+            try self.buf.writeLine("");
+            self.buf.indent();
+            for (slot.children.items) |child| {
+                try self.emitNode(child);
+            }
+            self.buf.dedent();
+            try self.buf.writeIndent();
+            try self.buf.write("}");
+        }
+
+        try self.buf.writeLine(");");
     }
 
     fn emitText(self: *Self, node: *ast.Node) !void {
