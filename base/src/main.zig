@@ -12,7 +12,6 @@ pub const emitter = @import("codegen/emitter.zig");
 
 pub const pipeline = @import("pipeline/pipeline.zig");
 pub const context = @import("pipeline/context.zig");
-pub const stage = @import("pipeline/stage.zig");
 
 pub const utils = @import("utils/utils.zig");
 
@@ -25,12 +24,10 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: Compil
 }
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) !*ast.Node {
-    var lex = lexer.Lexer.init(allocator, source);
-    defer lex.deinit();
-    const tokens = try lex.tokenize();
+    var l = lexer.Lexer.init(allocator, source);
+    const tokens = try l.tokenize();
 
     var p = parser.Parser.init(allocator, tokens);
-    defer p.deinit();
     return try p.parse();
 }
 
@@ -43,7 +40,7 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        try printUsage();
+        printUsage();
         return;
     }
 
@@ -73,14 +70,14 @@ pub fn main() !void {
     } else if (std.mem.eql(u8, command, "version") or std.mem.eql(u8, command, "-v")) {
         std.debug.print("mms 0.3.0\n", .{});
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "-h")) {
-        try printUsage();
+        printUsage();
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
-        try printUsage();
+        printUsage();
     }
 }
 
-fn printUsage() !void {
+fn printUsage() void {
     const usage =
         \\MMS Compiler v0.3
         \\

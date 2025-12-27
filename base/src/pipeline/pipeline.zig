@@ -1,12 +1,20 @@
 const std = @import("std");
 const context = @import("context.zig");
-const stage = @import("stage.zig");
 const ast = @import("../ast/nodes.zig");
 const lexer = @import("../lexer/lexer.zig");
 const parser = @import("../parser/parser.zig");
 const validator = @import("../validators/validator.zig");
 const transformer = @import("../transformers/transformer.zig");
 const emitter = @import("../codegen/emitter.zig");
+
+pub const PipelineError = error{
+    LexerFailed,
+    ParseFailed,
+    ValidationFailed,
+    TransformFailed,
+    EmitFailed,
+    OutOfMemory,
+};
 
 pub const Pipeline = struct {
     ctx: *context.CompilerContext,
@@ -16,7 +24,6 @@ pub const Pipeline = struct {
     ast_root: ?*ast.Node = null,
     validated: bool = false,
     transformed: bool = false,
-    output: ?CompileOutput = null,
 
     const Self = @This();
 
@@ -36,71 +43,87 @@ pub const Pipeline = struct {
     }
 
     pub fn run(self: *Self) !CompileOutput {
-        try self.lex();
-        if (self.ctx.hasErrors()) return self.buildErrorOutput();
+        self.lex() catch |err| {
+            try self.ctx.addError("lexer-error", "Lexer failed", ast.defaultSpan());
+            return self.buildOutput("", null, null);
+        };
 
-        try self.parse();
-        if (self.ctx.hasErrors()) return self.buildErrorOutput();
+        self.parse() catch |err| {
+            try self.ctx.addError("parse-error", "Parser failed", ast.defaultSpan());
+            return self.buildOutput("", null, null);
+        };
 
-        try self.validate();
-        if (self.ctx.hasErrors()) return self.buildErrorOutput();
+        self.validate() catch {};
 
-        try self.transform();
-        if (self.ctx.hasErrors()) return self.buildErrorOutput();
+        if (self.ctx.hasErrors()) {
+            return self.buildOutput("", null, null);
+        }
 
-        try self.emit();
+        self.transform() catch {};
 
-        return self.output orelse self.buildErrorOutput();
+        const emit_result = self.emit() catch {
+            return self.buildOutput("", null, null);
+        };
+
+        return self.buildOutput(emit_result.js, emit_result.css, emit_result.source_map);
     }
 
-    pub fn lex(self: *Self) !void {
-        var lex = lexer.Lexer.init(self.allocator, self.ctx.source);
-        self.tokens = try lex.tokenize();
+    fn lex(self: *Self) !void {
+        var l = lexer.Lexer.init(self.allocator, self.ctx.source);
+        self.tokens = try l.tokenize();
     }
 
-    pub fn parse(self: *Self) !void {
-        if (self.tokens == null) return error.StageSkipped;
+    fn parse(self: *Self) !void {
+        if (self.tokens == null) return PipelineError.LexerFailed;
 
         var p = parser.Parser.init(self.allocator, self.tokens.?);
         self.ast_root = try p.parse();
     }
 
-    pub fn validate(self: *Self) !void {
-        if (self.ast_root == null) return error.StageSkipped;
+    fn validate(self: *Self) !void {
+        if (self.ast_root == null) return;
 
         var v = try validator.Validator.init(self.allocator, self.ast_root.?, self.ctx.source);
-        _ = try v.validate();
+        defer v.deinit();
+
+        const result = try v.validate();
+
+        for (result.errors) |err| {
+            try self.ctx.addError(err.code, err.message, err.span);
+        }
+
+        for (result.warnings) |warn| {
+            try self.ctx.addWarning(warn.code, warn.message, warn.span);
+        }
+
         self.validated = true;
     }
 
-    pub fn transform(self: *Self) !void {
-        if (!self.validated) return error.StageSkipped;
+    fn transform(self: *Self) !void {
+        if (self.ast_root == null) return;
 
         var t = transformer.Transformer.init(self.allocator, self.ast_root.?, self.ctx.options);
-        _ = try t.transform();
+        defer t.deinit();
+
+        const result = try t.transform();
+        self.ast_root = result.root;
         self.transformed = true;
     }
 
-    pub fn emit(self: *Self) !void {
-        if (!self.transformed) return error.StageSkipped;
+    fn emit(self: *Self) !emitter.EmitResult {
+        if (self.ast_root == null) return PipelineError.EmitFailed;
 
         var e = try emitter.Emitter.init(self.allocator, self.ast_root.?, self.ctx.options);
-        const result = try e.emit();
+        defer e.deinit();
 
-        self.output = .{
-            .js = result.js,
-            .css = result.css,
-            .source_map = result.source_map,
-            .warnings = self.ctx.diagnostics.warnings.items,
-            .errors = self.ctx.diagnostics.errors.items,
-        };
+        return try e.emit();
     }
 
-    fn buildErrorOutput(self: *Self) CompileOutput {
+    fn buildOutput(self: *Self, js: []const u8, css: ?[]const u8, source_map: ?[]const u8) CompileOutput {
         return .{
-            .js = "",
-            .css = null,
-            .source_map = null,
+            .js = js,
+            .css = css,
+            .source_map = source_map,
             .warnings = self.ctx.diagnostics.warnings.items,
             .errors = self.ctx.diagnostics.errors.items,
         };
