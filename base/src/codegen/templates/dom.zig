@@ -7,6 +7,8 @@ pub const DomTemplate = struct {
     allocator: std.mem.Allocator,
     template_count: u32,
     block_count: u32,
+    scope_id: ?*const [8]u8,
+    hydrate: bool,
 
     const Self = @This();
 
@@ -16,6 +18,8 @@ pub const DomTemplate = struct {
             .allocator = allocator,
             .template_count = 0,
             .block_count = 0,
+            .scope_id = null,
+            .hydrate = false,
         };
     }
 
@@ -24,7 +28,11 @@ pub const DomTemplate = struct {
     }
 
     pub fn generate(self: *Self, node: *ast.Node) ![]u8 {
-        try self.buf.writeLine("import * as $ from 'mms/internal/client';");
+        if (self.hydrate) {
+            try self.buf.writeLine("import * as $ from 'mms/internal/client/hydrate';");
+        } else {
+            try self.buf.writeLine("import * as $ from 'mms/internal/client';");
+        }
 
         if (node.node_type == .root) {
             const root = node.data.root;
@@ -98,6 +106,20 @@ pub const DomTemplate = struct {
             if (after_props < line.len) {
                 try self.buf.write(line[after_props..]);
             }
+        } else if (std.mem.indexOf(u8, line, "$bindable(")) |idx| {
+            try self.buf.write(line[0..idx]);
+            try self.buf.write("$.bindable(");
+            const after = idx + 10;
+            if (after < line.len) {
+                try self.buf.write(line[after..]);
+            }
+        } else if (std.mem.indexOf(u8, line, "$inspect(")) |idx| {
+            try self.buf.write(line[0..idx]);
+            try self.buf.write("$.inspect(");
+            const after = idx + 9;
+            if (after < line.len) {
+                try self.buf.write(line[after..]);
+            }
         } else if (std.mem.indexOf(u8, line, "$state(")) |idx| {
             try self.buf.write(line[0..idx]);
             try self.buf.write("$.state(");
@@ -170,6 +192,12 @@ pub const DomTemplate = struct {
         try self.buf.writeNumber(id);
         try self.buf.write(" = $.template(`<");
         try self.buf.write(element.name);
+
+        if (self.scope_id) |sid| {
+            try self.buf.write(" class=\"svelte-");
+            try self.buf.write(sid[0..7]);
+            try self.buf.write("\"");
+        }
 
         for (element.attributes.items) |attr| {
             if (attr.node_type == .attribute) {

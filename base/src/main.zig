@@ -94,6 +94,7 @@ fn printUsage() void {
         \\Compile Options:
         \\  --dev                Enable development mode
         \\  --ssr                Generate server-side rendering code
+        \\  --hydrate            Generate hydration code
         \\  --sourcemap          Generate source maps
         \\  -o, --output <file>  Output file (default: stdout)
         \\
@@ -104,6 +105,7 @@ fn printUsage() void {
 const CliOptions = struct {
     dev: bool = false,
     ssr: bool = false,
+    hydrate: bool = false,
     sourcemap: bool = false,
     output: ?[]const u8 = null,
 };
@@ -117,6 +119,8 @@ fn parseArgs(args: []const []const u8) CliOptions {
             options.dev = true;
         } else if (std.mem.eql(u8, arg, "--ssr")) {
             options.ssr = true;
+        } else if (std.mem.eql(u8, arg, "--hydrate")) {
+            options.hydrate = true;
         } else if (std.mem.eql(u8, arg, "--sourcemap")) {
             options.sourcemap = true;
         } else if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output")) {
@@ -145,9 +149,10 @@ fn compileFile(base_allocator: std.mem.Allocator, filename: []const u8, cli_opti
         return;
     };
 
+    const gen_mode: GenerateMode = if (cli_options.ssr) .ssr else if (cli_options.hydrate) .hydrate else .dom;
     const options = CompilerOptions{
         .dev = cli_options.dev,
-        .generate = if (cli_options.ssr) .ssr else .dom,
+        .generate = gen_mode,
         .source_maps = cli_options.sourcemap,
         .filename = filename,
     };

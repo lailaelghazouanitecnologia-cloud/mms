@@ -5,6 +5,7 @@ const buffer = @import("../../utils/buffer.zig");
 pub const SsrTemplate = struct {
     buf: buffer.WriteBuffer,
     allocator: std.mem.Allocator,
+    scope_id: ?*const [8]u8,
 
     const Self = @This();
 
@@ -12,6 +13,7 @@ pub const SsrTemplate = struct {
         return .{
             .buf = buffer.WriteBuffer.init(allocator),
             .allocator = allocator,
+            .scope_id = null,
         };
     }
 
@@ -231,6 +233,12 @@ pub const SsrTemplate = struct {
 
         try self.buf.write("<");
         try self.buf.write(element.name);
+
+        if (self.scope_id) |sid| {
+            try self.buf.write(" class=\"svelte-");
+            try self.buf.write(sid[0..7]);
+            try self.buf.write("\"");
+        }
 
         var has_class_attr = false;
         var class_directives = std.ArrayList(*ast.Node).init(self.allocator);
