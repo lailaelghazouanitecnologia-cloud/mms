@@ -104,6 +104,7 @@ pub const DomTemplate = struct {
         self.template_count += 1;
 
         const is_void = isVoidElement(element.name);
+        const static_content = self.getStaticContent(element.children.items);
 
         try self.buf.writeIndent();
         try self.buf.write("var $$t_");
@@ -120,7 +121,11 @@ pub const DomTemplate = struct {
         if (is_void) {
             try self.buf.writeLine(" />`);");
         } else {
-            try self.buf.write("></");
+            try self.buf.write(">");
+            if (static_content) |content| {
+                try self.buf.write(content);
+            }
+            try self.buf.write("</");
             try self.buf.write(element.name);
             try self.buf.writeLine(">`);");
         }
@@ -140,14 +145,32 @@ pub const DomTemplate = struct {
             }
         }
 
-        for (element.children.items) |child| {
-            try self.emitNode(child);
+        if (static_content == null) {
+            for (element.children.items) |child| {
+                try self.emitNode(child);
+            }
         }
 
         try self.buf.writeIndent();
         try self.buf.write("$.close($$anchor, $$n_");
         try self.buf.writeNumber(id);
         try self.buf.writeLine(");");
+    }
+
+    fn getStaticContent(self: *Self, children: []*ast.Node) ?[]const u8 {
+        _ = self;
+        if (children.len == 0) return null;
+        if (children.len == 1) {
+            const child = children[0];
+            if (child.node_type == .text_node) {
+                const text = child.data.text_node.data;
+                const trimmed = std.mem.trim(u8, text, " \t\n\r");
+                if (trimmed.len > 0) {
+                    return trimmed;
+                }
+            }
+        }
+        return null;
     }
 
     fn isVoidElement(name: []const u8) bool {

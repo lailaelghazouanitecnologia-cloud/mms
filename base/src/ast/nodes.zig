@@ -63,6 +63,7 @@ pub const TokenType = enum {
     self_close_tag,
     mustache_open,
     mustache_close,
+    block_close,
     comment,
     doctype,
     directive_on,

@@ -197,12 +197,12 @@ pub const Lexer = struct {
             },
             ' ', '\t', '\r' => try self.scanWhitespace(start_pos),
             else => {
-                if (isDigit(c)) {
+                if (!self.in_tag and !self.in_mustache) {
+                    try self.scanText(start_pos);
+                } else if (isDigit(c)) {
                     try self.scanNumber(start_pos);
                 } else if (isAlpha(c)) {
                     try self.scanIdentifier(start_pos);
-                } else if (!self.in_tag and !self.in_mustache) {
-                    try self.scanText(start_pos);
                 }
             },
         }
@@ -288,6 +288,7 @@ pub const Lexer = struct {
     }
 
     fn scanText(self: *Self, start_pos: u32) !void {
+        const start_line = self.line;
         while (!self.isAtEnd()) {
             const c = self.peek();
             if (c == '<' or c == '{') break;
@@ -298,7 +299,14 @@ pub const Lexer = struct {
             _ = self.advance();
         }
         if (self.pos > start_pos) {
-            try self.tokens.append(.{ .type = .text, .value = self.source[start_pos..self.pos], .span = self.makeSpan(start_pos, self.pos) });
+            try self.tokens.append(.{
+                .type = .text,
+                .value = self.source[start_pos..self.pos],
+                .span = .{
+                    .start = .{ .line = start_line, .column = 1, .offset = start_pos },
+                    .end = .{ .line = self.line, .column = self.column, .offset = self.pos },
+                },
+            });
         }
     }
 
@@ -344,11 +352,13 @@ pub const Lexer = struct {
         if (std.mem.eql(u8, keyword, "await")) try self.tokens.append(.{ .type = .kw_await, .value = "{#await", .span = self.makeSpan(start_pos, self.pos) });
         if (std.mem.eql(u8, keyword, "key")) try self.tokens.append(.{ .type = .kw_key, .value = "{#key", .span = self.makeSpan(start_pos, self.pos) });
         if (std.mem.eql(u8, keyword, "snippet")) try self.tokens.append(.{ .type = .kw_snippet, .value = "{#snippet", .span = self.makeSpan(start_pos, self.pos) });
+        self.in_mustache = true;
     }
 
     fn scanBlockClose(self: *Self, start_pos: u32) !void {
         while (isAlpha(self.peek())) _ = self.advance();
-        try self.tokens.append(.{ .type = .mustache_close, .value = self.source[start_pos..self.pos], .span = self.makeSpan(start_pos, self.pos) });
+        if (self.peek() == '}') _ = self.advance();
+        try self.tokens.append(.{ .type = .block_close, .value = self.source[start_pos..self.pos], .span = self.makeSpan(start_pos, self.pos) });
     }
 
     fn scanBlockContinue(self: *Self, start_pos: u32) !void {
@@ -357,6 +367,7 @@ pub const Lexer = struct {
         if (std.mem.eql(u8, keyword, "else")) try self.tokens.append(.{ .type = .kw_else, .value = "{:else", .span = self.makeSpan(start_pos, self.pos) });
         if (std.mem.eql(u8, keyword, "then")) try self.tokens.append(.{ .type = .kw_then, .value = "{:then", .span = self.makeSpan(start_pos, self.pos) });
         if (std.mem.eql(u8, keyword, "catch")) try self.tokens.append(.{ .type = .kw_catch, .value = "{:catch", .span = self.makeSpan(start_pos, self.pos) });
+        self.in_mustache = true;
     }
 
     fn scanSpecialTag(self: *Self, start_pos: u32) !void {
