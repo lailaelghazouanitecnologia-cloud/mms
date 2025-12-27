@@ -41,7 +41,6 @@ pub const CodeGenerator = struct {
     indent_level: u32,
     allocator: std.mem.Allocator,
 
-    // State for code generation
     current_block_id: u32,
     template_count: u32,
     binding_count: u32,
@@ -72,7 +71,6 @@ pub const CodeGenerator = struct {
     }
 
     pub fn generate(self: *Self) CodeGenError!CompileResult {
-        // Generate based on mode
         if (self.options.generate == .ssr) {
             try self.generateSSR();
         } else {
@@ -89,15 +87,12 @@ pub const CodeGenerator = struct {
     }
 
     fn generateDOM(self: *Self) CodeGenError!void {
-        // Import runtime functions
         try self.writeImports();
 
-        // Generate component function
         try self.writeLine("");
         try self.writeLine("export default function Component($$anchor, $$props) {");
         self.indent_level += 1;
 
-        // Generate props destructuring
         if (self.analysis.uses_props_rune) {
             try self.writeIndent();
             try self.write("let { ");
@@ -108,13 +103,10 @@ pub const CodeGenerator = struct {
             try self.writeLine(" } = $props();");
         }
 
-        // Generate instance variables (from $state, $derived, etc.)
         try self.generateInstanceVariables();
 
-        // Generate template
         try self.generateTemplate(self.analysis.root.data.root.fragment);
 
-        // Generate effects
         try self.generateEffects();
 
         self.indent_level -= 1;
@@ -122,14 +114,12 @@ pub const CodeGenerator = struct {
     }
 
     fn generateSSR(self: *Self) CodeGenError!void {
-        // Import SSR runtime
         try self.writeLine("import * as $ from 'mms/internal/server';");
         try self.writeLine("");
 
         try self.writeLine("export default function Component($$payload, $$props) {");
         self.indent_level += 1;
 
-        // Generate SSR template
         try self.writeIndent();
         try self.write("$$payload.out += `");
         try self.generateSSRTemplate(self.analysis.root.data.root.fragment);
@@ -154,8 +144,6 @@ pub const CodeGenerator = struct {
     }
 
     fn generateInstanceVariables(self: *Self) CodeGenError!void {
-        // Would generate reactive state declarations
-        // For now, just a placeholder
         _ = self;
     }
 
@@ -187,14 +175,12 @@ pub const CodeGenerator = struct {
         const template_id = self.template_count;
         self.template_count += 1;
 
-        // Create template
         try self.writeIndent();
         try self.write("var ");
         try self.writeTemplateVar(template_id);
         try self.write(" = $.template(`<");
         try self.write(element.name);
 
-        // Generate attributes
         for (element.attributes.items) |attr| {
             if (attr.node_type == .attribute) {
                 const attribute = attr.data.attribute;
@@ -224,7 +210,6 @@ pub const CodeGenerator = struct {
             try self.writeLine("");
         }
 
-        // Clone template
         try self.writeIndent();
         try self.write("var ");
         try self.writeNodeVar(template_id);
@@ -232,7 +217,6 @@ pub const CodeGenerator = struct {
         try self.writeTemplateVar(template_id);
         try self.writeLine("());");
 
-        // Generate dynamic attributes and bindings
         for (element.attributes.items) |attr| {
             if (attr.node_type == .directive) {
                 try self.generateDirective(attr, template_id);
@@ -247,14 +231,12 @@ pub const CodeGenerator = struct {
             }
         }
 
-        // Generate children
         if (!element.self_closing) {
             for (element.children.items) |child| {
                 try self.generateTemplate(child);
             }
         }
 
-        // Append to anchor
         try self.writeIndent();
         try self.write("$.append($$anchor, ");
         try self.writeNodeVar(template_id);
@@ -268,7 +250,6 @@ pub const CodeGenerator = struct {
         try self.write(component.name);
         try self.write("($$anchor, {");
 
-        // Generate props
         var first = true;
         for (component.attributes.items) |attr| {
             if (attr.node_type == .attribute) {
@@ -302,7 +283,6 @@ pub const CodeGenerator = struct {
     fn generateText(self: *Self, node: *ast.Node) CodeGenError!void {
         const text = node.data.text_node;
 
-        // Skip whitespace-only text in most cases
         const trimmed = std.mem.trim(u8, text.data, " \t\n\r");
         if (trimmed.len == 0 and !self.options.preserve_whitespace) {
             return;
@@ -378,7 +358,6 @@ pub const CodeGenerator = struct {
         try self.generateExpression(each_block.expression);
         try self.write(", (");
 
-        // Context and index
         try self.generateExpression(each_block.context);
         if (each_block.index) |index| {
             try self.write(", ");
@@ -388,15 +367,10 @@ pub const CodeGenerator = struct {
         try self.writeLine(") => {");
         self.indent_level += 1;
 
-        // Key function
         if (each_block.key) |key| {
-            try self.writeIndent();
-            try self.write("/* key: ");
-            try self.generateExpression(key);
-            try self.writeLine(" */");
+            _ = key;
         }
 
-        // Body
         for (each_block.children.items) |child| {
             try self.generateTemplate(child);
         }
@@ -405,7 +379,6 @@ pub const CodeGenerator = struct {
         try self.writeIndent();
         try self.write("}");
 
-        // Fallback
         if (each_block.fallback) |fallback| {
             try self.writeLine(", () => {");
             self.indent_level += 1;
@@ -430,7 +403,6 @@ pub const CodeGenerator = struct {
 
         self.indent_level += 1;
 
-        // Pending
         if (await_block.pending) |pending| {
             try self.writeIndent();
             try self.writeLine("pending: ($$anchor) => {");
@@ -441,7 +413,6 @@ pub const CodeGenerator = struct {
             try self.writeLine("},");
         }
 
-        // Then
         if (await_block.then_node) |then_node| {
             try self.writeIndent();
             try self.write("then: ($$anchor, ");
@@ -458,7 +429,6 @@ pub const CodeGenerator = struct {
             try self.writeLine("},");
         }
 
-        // Catch
         if (await_block.catch_node) |catch_node| {
             try self.writeIndent();
             try self.write("catch: ($$anchor, ");
@@ -648,7 +618,6 @@ pub const CodeGenerator = struct {
     }
 
     fn generateEffects(self: *Self) CodeGenError!void {
-        // Would generate reactive effects
         _ = self;
     }
 
@@ -665,7 +634,6 @@ pub const CodeGenerator = struct {
                 try self.write("<");
                 try self.write(element.name);
 
-                // Attributes
                 for (element.attributes.items) |attr| {
                     if (attr.node_type == .attribute) {
                         const attribute = attr.data.attribute;
@@ -681,7 +649,6 @@ pub const CodeGenerator = struct {
                                 try self.write(" ");
                                 try self.write(attribute.name);
                                 try self.write("=\"${$.escape(");
-                                // Would generate expression
                                 try self.write(")}\"");
                             },
                             .boolean => |val| {
@@ -823,7 +790,6 @@ pub const CodeGenerator = struct {
         }
     }
 
-    // Helper methods
     fn write(self: *Self, str: []const u8) CodeGenError!void {
         self.output.appendSlice(str) catch return CodeGenError.OutOfMemory;
     }
@@ -875,7 +841,5 @@ pub const CodeGenerator = struct {
     }
 };
 
-// Tests
 test "codegen basic" {
-    // Would test code generation
 }

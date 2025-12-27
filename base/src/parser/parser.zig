@@ -38,16 +38,12 @@ pub const Parser = struct {
         self.errors.deinit();
     }
 
-    /// Parse the entire template into an AST Root node
     pub fn parse(self: *Self) ParseError!*ast.Node {
         const fragment = try self.parseFragment();
 
         var instance: ?*ast.Node = null;
         var module: ?*ast.Node = null;
         var css: ?*ast.Node = null;
-
-        // Check for script and style at top level
-        // These would be parsed separately in a full implementation
 
         const root_data = ast.NodeData{
             .root = .{
@@ -71,7 +67,6 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse a fragment (sequence of nodes)
     fn parseFragment(self: *Self) ParseError!*ast.Node {
         var children = std.ArrayList(*ast.Node).init(self.allocator);
 
@@ -84,7 +79,6 @@ pub const Parser = struct {
                     try children.append(element);
                 },
                 .close_tag => {
-                    // End of parent element
                     break;
                 },
                 .text => {
@@ -160,12 +154,10 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse an HTML element or component
     fn parseElement(self: *Self) ParseError!*ast.Node {
-        const start_token = self.advance(); // Consume '<'
+        const start_token = self.advance();
         _ = start_token;
 
-        // Get element name
         const name_token = self.advance();
         if (name_token.type != .identifier) {
             return ParseError.UnexpectedToken;
@@ -178,7 +170,6 @@ pub const Parser = struct {
         var attributes = std.ArrayList(*ast.Node).init(self.allocator);
         var children = std.ArrayList(*ast.Node).init(self.allocator);
 
-        // Parse attributes
         while (!self.isAtEnd()) {
             self.skipWhitespace();
             const token = self.peek();
@@ -190,14 +181,11 @@ pub const Parser = struct {
 
             if (token.type == .rbracket) {
                 _ = self.advance();
-                // Parse children
                 children = (try self.parseFragment()).data.fragment.children;
-                // Expect closing tag
                 try self.expectClosingTag(name);
                 break;
             }
 
-            // Parse attribute
             if (token.type == .identifier or
                 token.type == .directive_on or
                 token.type == .directive_bind or
@@ -213,7 +201,6 @@ pub const Parser = struct {
                 const attr = try self.parseAttribute();
                 try attributes.append(attr);
             } else if (token.type == .lbrace) {
-                // Spread attribute
                 const spread = try self.parseSpreadAttribute();
                 try attributes.append(spread);
             } else {
@@ -221,7 +208,6 @@ pub const Parser = struct {
             }
         }
 
-        // Determine node type
         if (is_svelte_element) {
             return try self.createSvelteElement(name, attributes, children);
         } else if (is_component) {
@@ -314,7 +300,6 @@ pub const Parser = struct {
             };
             return ast.createNode(self.allocator, .svelte_self, ast.defaultSpan(), data);
         } else {
-            // Generic element fallback
             const data = ast.NodeData{
                 .element = .{
                     .name = name,
@@ -327,11 +312,9 @@ pub const Parser = struct {
         }
     }
 
-    /// Parse an attribute
     fn parseAttribute(self: *Self) ParseError!*ast.Node {
         const name_token = self.advance();
 
-        // Check for directive
         switch (name_token.type) {
             .directive_on,
             .directive_bind,
@@ -349,12 +332,11 @@ pub const Parser = struct {
             else => {},
         }
 
-        // Regular attribute
         const name = name_token.value;
         var value: ast.AttributeValue = .{ .boolean = true };
 
         if (self.check(.eq)) {
-            _ = self.advance(); // Consume '='
+            _ = self.advance();
 
             self.skipWhitespace();
 
@@ -386,7 +368,6 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse a directive (on:, bind:, use:, etc.)
     fn parseDirective(self: *Self, token: ast.Token) ParseError!*ast.Node {
         const directive_type: ast.DirectiveType = switch (token.type) {
             .directive_on => .on,
@@ -402,14 +383,12 @@ pub const Parser = struct {
             else => unreachable,
         };
 
-        // Get directive name (e.g., 'click' in on:click)
         var name: []const u8 = "";
         var modifiers = std.ArrayList([]const u8).init(self.allocator);
 
         if (self.check(.identifier)) {
             name = self.advance().value;
 
-            // Parse modifiers (e.g., |preventDefault)
             while (self.check(.pipe)) {
                 _ = self.advance();
                 if (self.check(.identifier)) {
@@ -418,7 +397,6 @@ pub const Parser = struct {
             }
         }
 
-        // Parse expression value
         var expression: ?*ast.Node = null;
 
         if (self.check(.eq)) {
@@ -451,11 +429,9 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse a spread attribute {...obj}
     fn parseSpreadAttribute(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{'
+        _ = self.advance();
 
-        // Expect '...'
         if (self.check(.dot)) {
             _ = self.advance();
             _ = self.advance();
@@ -482,9 +458,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {#if ...}
     fn parseIfBlock(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{#if'
+        _ = self.advance();
 
         self.skipWhitespace();
         const test_expr = try self.parseExpression();
@@ -497,14 +472,12 @@ pub const Parser = struct {
 
         var alternate: ?*ast.Node = null;
 
-        // Check for {:else} or {:else if}
         if (self.check(.kw_else)) {
             _ = self.advance();
 
             self.skipWhitespace();
 
             if (self.check(.kw_if)) {
-                // {:else if}
                 alternate = try self.parseIfBlock();
             } else {
                 if (self.check(.mustache_close)) {
@@ -513,9 +486,6 @@ pub const Parser = struct {
                 alternate = try self.parseFragment();
             }
         }
-
-        // Expect {/if}
-        // Skip closing for now
 
         const if_data = ast.NodeData{
             .if_block = .{
@@ -534,17 +504,15 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {#each ...}
     fn parseEachBlock(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{#each'
+        _ = self.advance();
 
         self.skipWhitespace();
         const list_expr = try self.parseExpression();
 
-        // Expect 'as'
         self.skipWhitespace();
         if (self.check(.identifier)) {
-            _ = self.advance(); // 'as'
+            _ = self.advance();
         }
 
         self.skipWhitespace();
@@ -553,7 +521,6 @@ pub const Parser = struct {
         var index: ?[]const u8 = null;
         var key: ?*ast.Node = null;
 
-        // Check for index
         if (self.check(.comma)) {
             _ = self.advance();
             self.skipWhitespace();
@@ -562,7 +529,6 @@ pub const Parser = struct {
             }
         }
 
-        // Check for key
         if (self.check(.lparen)) {
             _ = self.advance();
             key = try self.parseExpression();
@@ -578,7 +544,6 @@ pub const Parser = struct {
         const body = try self.parseFragment();
         var fallback: ?*ast.Node = null;
 
-        // Check for {:else}
         if (self.check(.kw_else)) {
             _ = self.advance();
             if (self.check(.mustache_close)) {
@@ -606,9 +571,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {#await ...}
     fn parseAwaitBlock(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{#await'
+        _ = self.advance();
 
         self.skipWhitespace();
         const promise_expr = try self.parseExpression();
@@ -619,7 +583,6 @@ pub const Parser = struct {
         var error_node: ?*ast.Node = null;
         var catch_node: ?*ast.Node = null;
 
-        // Check for 'then' inline
         self.skipWhitespace();
         if (self.check(.kw_then)) {
             _ = self.advance();
@@ -633,7 +596,6 @@ pub const Parser = struct {
             _ = self.advance();
         }
 
-        // Parse pending block or then block
         const first_block = try self.parseFragment();
 
         if (self.check(.kw_then)) {
@@ -651,7 +613,6 @@ pub const Parser = struct {
             then_node = first_block;
         }
 
-        // Check for {:catch}
         if (self.check(.kw_catch)) {
             _ = self.advance();
             self.skipWhitespace();
@@ -683,9 +644,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {#key ...}
     fn parseKeyBlock(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{#key'
+        _ = self.advance();
 
         self.skipWhitespace();
         const key_expr = try self.parseExpression();
@@ -711,9 +671,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {#snippet name(...)}
     fn parseSnippetBlock(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{#snippet'
+        _ = self.advance();
 
         self.skipWhitespace();
         var name: []const u8 = "";
@@ -723,7 +682,6 @@ pub const Parser = struct {
 
         var parameters = std.ArrayList(*ast.Node).init(self.allocator);
 
-        // Parse parameters
         if (self.check(.lparen)) {
             _ = self.advance();
             while (!self.check(.rparen) and !self.isAtEnd()) {
@@ -763,9 +721,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {@html ...}
     fn parseHtmlTag(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{@html'
+        _ = self.advance();
 
         self.skipWhitespace();
         const expr = try self.parseExpression();
@@ -788,9 +745,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {@render ...}
     fn parseRenderTag(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{@render'
+        _ = self.advance();
 
         self.skipWhitespace();
         const expr = try self.parseExpression();
@@ -814,9 +770,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {@const ...}
     fn parseConstTag(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{@const'
+        _ = self.advance();
 
         self.skipWhitespace();
         const decl = try self.parseExpression();
@@ -839,9 +794,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {@debug ...}
     fn parseDebugTag(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{@debug'
+        _ = self.advance();
 
         var identifiers = std.ArrayList(*ast.Node).init(self.allocator);
 
@@ -874,7 +828,6 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse text node
     fn parseText(self: *Self) ParseError!*ast.Node {
         const token = self.advance();
 
@@ -893,9 +846,8 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse {expression}
     fn parseExpressionTag(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{'
+        _ = self.advance();
 
         const expr = try self.parseExpression();
 
@@ -917,7 +869,6 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse a comment
     fn parseComment(self: *Self) ParseError!*ast.Node {
         const token = self.advance();
 
@@ -935,7 +886,6 @@ pub const Parser = struct {
         );
     }
 
-    /// Parse an expression (simplified)
     fn parseExpression(self: *Self) ParseError!*ast.Node {
         return self.parseConditional();
     }
@@ -1343,7 +1293,6 @@ pub const Parser = struct {
                 return try self.parseObjectExpression();
             },
             else => {
-                // Return empty identifier for now
                 const id_data = ast.NodeData{
                     .identifier_expr = .{
                         .name = "",
@@ -1360,7 +1309,7 @@ pub const Parser = struct {
     }
 
     fn parseArrayExpression(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '['
+        _ = self.advance();
 
         var elements = std.ArrayList(?*ast.Node).init(self.allocator);
 
@@ -1368,7 +1317,6 @@ pub const Parser = struct {
             self.skipWhitespace();
 
             if (self.check(.comma)) {
-                // Hole in array
                 try elements.append(null);
                 _ = self.advance();
             } else {
@@ -1400,14 +1348,13 @@ pub const Parser = struct {
     }
 
     fn parseObjectExpression(self: *Self) ParseError!*ast.Node {
-        _ = self.advance(); // Consume '{'
+        _ = self.advance();
 
         var properties = std.ArrayList(*ast.Node).init(self.allocator);
 
         while (!self.check(.rbrace) and !self.isAtEnd()) {
             self.skipWhitespace();
 
-            // Parse property (simplified - just key: value)
             if (self.check(.identifier) or self.check(.string)) {
                 const key = try self.parsePrimary();
 
@@ -1419,7 +1366,6 @@ pub const Parser = struct {
 
                 const value = try self.parseExpression();
 
-                // Create a pseudo-property node using binary expr
                 const prop_data = ast.NodeData{
                     .binary_expr = .{
                         .operator = ":",
@@ -1482,7 +1428,6 @@ pub const Parser = struct {
         }
     }
 
-    // Helper methods
     fn isAtEnd(self: *Self) bool {
         return self.current >= self.tokens.len or self.peek().type == .eof;
     }
@@ -1521,7 +1466,6 @@ fn isUpperCase(c: u8) bool {
     return c >= 'A' and c <= 'Z';
 }
 
-// Tests
 test "parser basic element" {
     const allocator = std.testing.allocator;
 

@@ -21,15 +21,15 @@ pub const Binding = struct {
 
 pub const BindingKind = enum {
     normal,
-    state, // $state
-    derived, // $derived
-    prop, // $props
-    bindable, // $bindable
+    state,
+    derived,
+    prop,
+    bindable,
     each_item,
     each_index,
     snippet_param,
     const_tag,
-    store_sub, // $store
+    store_sub,
 };
 
 pub const Scope = struct {
@@ -80,21 +80,17 @@ pub const ComponentAnalysis = struct {
     source: []const u8,
     allocator: std.mem.Allocator,
 
-    // Analysis results
     root_scope: Scope,
     reactive_statements: std.ArrayList(*ast.Node),
     template_scope: Scope,
 
-    // Component metadata
     props: std.ArrayList(PropInfo),
     exports: std.ArrayList(ExportInfo),
     stores: std.ArrayList(StoreInfo),
 
-    // Warnings and errors
     warnings: std.ArrayList(Warning),
     errors: std.ArrayList(Error),
 
-    // Flags
     uses_slots: bool,
     uses_component_bindings: bool,
     uses_props_rune: bool,
@@ -222,26 +218,21 @@ pub const Analyzer = struct {
     fn analyzeRoot(self: *Self, node: *ast.Node) AnalysisError!void {
         const root = node.data.root;
 
-        // Analyze instance script
         if (root.instance) |instance| {
             self.analysis.has_script = true;
             try self.analyzeScript(instance);
         }
 
-        // Analyze module script
         if (root.module) |module| {
             try self.analyzeModuleScript(module);
         }
 
-        // Analyze options
         if (root.options) |options| {
             try self.analyzeOptions(options);
         }
 
-        // Analyze template
         try self.analyzeNode(root.fragment);
 
-        // Analyze CSS
         if (root.css) |css| {
             self.analysis.has_style = true;
             try self.analyzeStyle(css);
@@ -259,17 +250,14 @@ pub const Analyzer = struct {
     fn analyzeElement(self: *Self, node: *ast.Node) AnalysisError!void {
         const element = node.data.element;
 
-        // Analyze attributes
         for (element.attributes.items) |attr| {
             try self.analyzeNode(attr);
         }
 
-        // Analyze children
         for (element.children.items) |child| {
             try self.analyzeNode(child);
         }
 
-        // Check for special elements
         if (std.mem.eql(u8, element.name, "slot")) {
             self.analysis.uses_slots = true;
         }
@@ -278,7 +266,6 @@ pub const Analyzer = struct {
     fn analyzeComponent(self: *Self, node: *ast.Node) AnalysisError!void {
         const component = node.data.component;
 
-        // Check if component is defined
         if (self.current_scope.lookup(component.name) == null) {
             try self.analysis.warnings.append(.{
                 .code = "component-not-found",
@@ -287,12 +274,10 @@ pub const Analyzer = struct {
             });
         }
 
-        // Analyze attributes (props)
         for (component.attributes.items) |attr| {
             try self.analyzeNode(attr);
         }
 
-        // Analyze children (slots)
         for (component.children.items) |child| {
             try self.analyzeNode(child);
         }
@@ -301,13 +286,10 @@ pub const Analyzer = struct {
     fn analyzeIfBlock(self: *Self, node: *ast.Node) AnalysisError!void {
         const if_block = node.data.if_block;
 
-        // Analyze test expression
         try self.analyzeNode(if_block.test);
 
-        // Analyze consequent (then branch)
         try self.analyzeNode(if_block.consequent);
 
-        // Analyze alternate (else branch)
         if (if_block.alternate) |alternate| {
             try self.analyzeNode(alternate);
         }
@@ -316,19 +298,16 @@ pub const Analyzer = struct {
     fn analyzeEachBlock(self: *Self, node: *ast.Node) AnalysisError!void {
         const each_block = node.data.each_block;
 
-        // Analyze iterable expression
         try self.analyzeNode(each_block.expression);
 
-        // Create new scope for each block
         var each_scope = Scope.init(self.allocator, self.current_scope);
         defer each_scope.deinit();
 
         const old_scope = self.current_scope;
         self.current_scope = &each_scope;
 
-        // Add context binding
         try each_scope.declare("item", .{
-            .name = "item", // Would be the actual context name
+            .name = "item",
             .kind = .each_item,
             .node = each_block.context,
             .mutated = false,
@@ -336,7 +315,6 @@ pub const Analyzer = struct {
             .referenced = false,
         });
 
-        // Add index binding if present
         if (each_block.index) |index_name| {
             try each_scope.declare(index_name, .{
                 .name = index_name,
@@ -348,17 +326,14 @@ pub const Analyzer = struct {
             });
         }
 
-        // Analyze key expression
         if (each_block.key) |key| {
             try self.analyzeNode(key);
         }
 
-        // Analyze body
         for (each_block.children.items) |child| {
             try self.analyzeNode(child);
         }
 
-        // Analyze fallback
         if (each_block.fallback) |fallback| {
             try self.analyzeNode(fallback);
         }
@@ -369,22 +344,18 @@ pub const Analyzer = struct {
     fn analyzeAwaitBlock(self: *Self, node: *ast.Node) AnalysisError!void {
         const await_block = node.data.await_block;
 
-        // Analyze promise expression
         try self.analyzeNode(await_block.expression);
 
-        // Analyze pending block
         if (await_block.pending) |pending| {
             try self.analyzeNode(pending);
         }
 
-        // Create scope for then block with value binding
         if (await_block.then_node) |then_node| {
             var then_scope = Scope.init(self.allocator, self.current_scope);
             defer then_scope.deinit();
 
             if (await_block.value) |value| {
-                // Add value binding
-                _ = value; // Would extract identifier name
+                _ = value;
             }
 
             const old_scope = self.current_scope;
@@ -393,13 +364,12 @@ pub const Analyzer = struct {
             self.current_scope = old_scope;
         }
 
-        // Create scope for catch block with error binding
         if (await_block.catch_node) |catch_node| {
             var catch_scope = Scope.init(self.allocator, self.current_scope);
             defer catch_scope.deinit();
 
             if (await_block.error_node) |error_val| {
-                _ = error_val; // Would extract identifier name
+                _ = error_val;
             }
 
             const old_scope = self.current_scope;
@@ -412,10 +382,8 @@ pub const Analyzer = struct {
     fn analyzeKeyBlock(self: *Self, node: *ast.Node) AnalysisError!void {
         const key_block = node.data.key_block;
 
-        // Analyze key expression
         try self.analyzeNode(key_block.expression);
 
-        // Analyze children
         for (key_block.children.items) |child| {
             try self.analyzeNode(child);
         }
@@ -424,12 +392,10 @@ pub const Analyzer = struct {
     fn analyzeSnippetBlock(self: *Self, node: *ast.Node) AnalysisError!void {
         const snippet = node.data.snippet_block;
 
-        // Create scope for snippet
         var snippet_scope = Scope.init(self.allocator, self.current_scope);
         snippet_scope.in_snippet = true;
         defer snippet_scope.deinit();
 
-        // Add parameters to scope
         for (snippet.parameters.items) |param| {
             if (param.node_type == .identifier_expr) {
                 try snippet_scope.declare(param.data.identifier_expr.name, .{
@@ -448,7 +414,6 @@ pub const Analyzer = struct {
         try self.analyzeNode(snippet.body);
         self.current_scope = old_scope;
 
-        // Register snippet in parent scope
         try self.current_scope.declare(snippet.name, .{
             .name = snippet.name,
             .kind = .normal,
@@ -468,7 +433,6 @@ pub const Analyzer = struct {
         const html_tag = node.data.html_tag;
         try self.analyzeNode(html_tag.expression);
 
-        // Warn about XSS risk
         try self.analysis.warnings.append(.{
             .code = "security-xss",
             .message = "@html can lead to XSS vulnerabilities",
@@ -509,18 +473,15 @@ pub const Analyzer = struct {
     fn analyzeDirective(self: *Self, node: *ast.Node) AnalysisError!void {
         const directive = node.data.directive;
 
-        // Analyze expression
         if (directive.expression) |expr| {
             try self.analyzeNode(expr);
         }
 
-        // Validate directive usage
         switch (directive.directive_type) {
             .bind => {
                 self.analysis.uses_component_bindings = true;
             },
             .use => {
-                // Action directive - check if action exists
                 if (directive.expression) |expr| {
                     if (expr.node_type == .identifier_expr) {
                         const name = expr.data.identifier_expr.name;
@@ -534,12 +495,8 @@ pub const Analyzer = struct {
                     }
                 }
             },
-            .transition, .in_directive, .out_directive => {
-                // Check transition function exists
-            },
-            .animate => {
-                // Check animate function exists
-            },
+            .transition, .in_directive, .out_directive => {},
+            .animate => {},
             else => {},
         }
     }
@@ -552,9 +509,7 @@ pub const Analyzer = struct {
     fn analyzeIdentifier(self: *Self, node: *ast.Node) AnalysisError!void {
         const id = node.data.identifier_expr;
 
-        // Check if identifier is defined
         if (self.current_scope.lookup(id.name) == null) {
-            // Could be a global or builtin
             if (!isBuiltin(id.name)) {
                 try self.analysis.warnings.append(.{
                     .code = "undefined-reference",
@@ -564,7 +519,6 @@ pub const Analyzer = struct {
             }
         }
 
-        // Check for rune usage
         if (std.mem.startsWith(u8, id.name, "$state")) {
             self.analysis.uses_state_rune = true;
         } else if (std.mem.startsWith(u8, id.name, "$derived")) {
@@ -602,13 +556,11 @@ pub const Analyzer = struct {
     fn analyzeScript(self: *Self, node: *ast.Node) AnalysisError!void {
         _ = self;
         _ = node;
-        // Would parse and analyze JavaScript/TypeScript content
     }
 
     fn analyzeModuleScript(self: *Self, node: *ast.Node) AnalysisError!void {
         _ = self;
         _ = node;
-        // Would parse and analyze module-level JavaScript
     }
 
     fn analyzeOptions(self: *Self, node: *ast.Node) AnalysisError!void {
@@ -627,7 +579,6 @@ pub const Analyzer = struct {
     fn analyzeStyle(self: *Self, node: *ast.Node) AnalysisError!void {
         _ = self;
         _ = node;
-        // Would analyze CSS content
     }
 };
 
@@ -682,11 +633,9 @@ fn isBuiltin(name: []const u8) bool {
     return false;
 }
 
-// Tests
 test "analyzer basic" {
     const allocator = std.testing.allocator;
 
-    // Create a simple root node for testing
     var children = std.ArrayList(*ast.Node).init(allocator);
     defer children.deinit();
 
