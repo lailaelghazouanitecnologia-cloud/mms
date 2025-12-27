@@ -285,10 +285,10 @@ pub const SvelteBoundaryNode = struct {
 };
 
 pub const IfBlockNode = struct {
-    test: *Node,
+    condition: *Node,
     consequent: *Node,
     alternate: ?*Node,
-    elseif: bool = false,
+    is_elseif: bool = false,
 };
 
 pub const ElseBlockNode = struct {
@@ -296,7 +296,7 @@ pub const ElseBlockNode = struct {
 };
 
 pub const ElseIfBlockNode = struct {
-    test: *Node,
+    condition: *Node,
     consequent: *Node,
     alternate: ?*Node,
 };
@@ -472,7 +472,7 @@ pub const UnaryExpr = struct {
 };
 
 pub const ConditionalExpr = struct {
-    test: *Node,
+    condition: *Node,
     consequent: *Node,
     alternate: *Node,
 };

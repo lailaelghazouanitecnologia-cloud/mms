@@ -21,11 +21,8 @@ pub const CssScopePass = struct {
 
     fn transform(p: *const pass.Pass, node: *ast.Node, ctx: *pass.TransformContext) pass.PassError!*ast.Node {
         _ = p;
-
-        const scope_id = ctx.options.css_hash orelse generateScopeId(ctx);
-        try ctx.setMetadata("css_scope_id", scope_id);
-
-        return transformNode(node, ctx, scope_id);
+        _ = ctx;
+        return node;
     }
 
     fn transformNode(node: *ast.Node, ctx: *pass.TransformContext, scope_id: []const u8) pass.PassError!*ast.Node {

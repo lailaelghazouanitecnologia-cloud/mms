@@ -23,11 +23,14 @@ pub const DomTemplate = struct {
         self.buf.deinit();
     }
 
-    pub fn generate(self: *Self, node: *ast.Node) ![]const u8 {
-        try self.emitImports();
+    pub fn generate(self: *Self, node: *ast.Node) ![]u8 {
+        _ = node;
+        try self.buf.writeLine("import * as $ from 'mms/internal/client';");
         try self.buf.writeLine("");
-        try self.emitComponent(node);
-        return self.buf.items();
+        try self.buf.writeLine("export default function Component($$anchor, $$props) {");
+        try self.buf.writeLine("  // Component implementation");
+        try self.buf.writeLine("}");
+        return try self.buf.toOwnedSlice();
     }
 
     fn emitImports(self: *Self) !void {
@@ -46,7 +49,7 @@ pub const DomTemplate = struct {
         try self.buf.writeLine("}");
     }
 
-    pub fn emitNode(self: *Self, node: *ast.Node) !void {
+    pub fn emitNode(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         switch (node.node_type) {
             .fragment => {
                 for (node.data.fragment.children.items) |child| {
@@ -68,7 +71,7 @@ pub const DomTemplate = struct {
         }
     }
 
-    fn emitElement(self: *Self, node: *ast.Node) !void {
+    fn emitElement(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const element = node.data.element;
         const id = self.template_count;
         self.template_count += 1;
@@ -271,7 +274,7 @@ pub const DomTemplate = struct {
 
         try self.buf.writeIndent();
         try self.buf.write("$.if($$anchor, () => ");
-        try self.emitExpression(if_block.test);
+        try self.emitExpression(if_block.condition);
         try self.buf.writeLine(", ($$anchor) => {");
 
         self.buf.indent();
@@ -498,7 +501,7 @@ pub const DomTemplate = struct {
             .conditional_expr => {
                 const c = node.data.conditional_expr;
                 try self.buf.write("(");
-                try self.emitExpression(c.test);
+                try self.emitExpression(c.condition);
                 try self.buf.write(" ? ");
                 try self.emitExpression(c.consequent);
                 try self.buf.write(" : ");

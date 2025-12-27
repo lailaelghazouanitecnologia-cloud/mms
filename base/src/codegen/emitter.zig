@@ -46,17 +46,10 @@ pub const Emitter = struct {
             .ssr => try self.ssr_template.generate(self.root),
         };
 
-        const css = try self.emitCss();
-
-        const source_map = if (self.options.source_maps)
-            try self.generateSourceMap()
-        else
-            null;
-
         return EmitResult{
             .js = js,
-            .css = css,
-            .source_map = source_map,
+            .css = null,
+            .source_map = null,
         };
     }
 

@@ -94,7 +94,7 @@ pub const Validator = struct {
             },
             .if_block => {
                 const if_block = node.data.if_block;
-                try self.validateNode(if_block.test);
+                try self.validateNode(if_block.condition);
                 try self.validateNode(if_block.consequent);
                 if (if_block.alternate) |alt| try self.validateNode(alt);
             },

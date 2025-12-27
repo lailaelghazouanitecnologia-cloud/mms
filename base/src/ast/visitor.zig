@@ -62,7 +62,7 @@ pub fn Visitor(comptime ContextType: type, comptime ResultType: type) type {
                     }
                 },
                 .if_block => {
-                    _ = try self.visit(node.data.if_block.test);
+                    _ = try self.visit(node.data.if_block.condition);
                     _ = try self.visit(node.data.if_block.consequent);
                     if (node.data.if_block.alternate) |alt| {
                         _ = try self.visit(alt);
@@ -152,7 +152,7 @@ pub fn Visitor(comptime ContextType: type, comptime ResultType: type) type {
                     _ = try self.visit(node.data.unary_expr.argument);
                 },
                 .conditional_expr => {
-                    _ = try self.visit(node.data.conditional_expr.test);
+                    _ = try self.visit(node.data.conditional_expr.condition);
                     _ = try self.visit(node.data.conditional_expr.consequent);
                     _ = try self.visit(node.data.conditional_expr.alternate);
                 },

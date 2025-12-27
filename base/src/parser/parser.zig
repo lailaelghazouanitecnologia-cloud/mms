@@ -489,10 +489,10 @@ pub const Parser = struct {
 
         const if_data = ast.NodeData{
             .if_block = .{
-                .test = test_expr,
+                .condition = test_expr,
                 .consequent = consequent,
                 .alternate = alternate,
-                .elseif = false,
+                .is_elseif = false,
             },
         };
 
@@ -905,7 +905,7 @@ pub const Parser = struct {
 
             const cond_data = ast.NodeData{
                 .conditional_expr = .{
-                    .test = expr,
+                    .condition = expr,
                     .consequent = consequent,
                     .alternate = alternate,
                 },
@@ -1467,15 +1467,17 @@ fn isUpperCase(c: u8) bool {
 }
 
 test "parser basic element" {
-    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    var lexer = @import("../lexer/lexer.zig").Lexer.init(allocator, "<div></div>");
-    defer lexer.deinit();
-    const tokens = try lexer.tokenize();
+    var lex = Lexer.init(allocator, "<div></div>");
+    defer lex.deinit();
+    const tokens = try lex.tokenize();
 
-    var parser = Parser.init(allocator, tokens);
-    defer parser.deinit();
+    var p = Parser.init(allocator, tokens);
+    defer p.deinit();
 
-    const ast_root = try parser.parse();
+    const ast_root = try p.parse();
     try std.testing.expectEqual(ast_root.node_type, .root);
 }

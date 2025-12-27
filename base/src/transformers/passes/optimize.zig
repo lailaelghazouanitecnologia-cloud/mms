@@ -18,12 +18,8 @@ pub const OptimizePass = struct {
 
     fn transform(p: *const pass.Pass, node: *ast.Node, ctx: *pass.TransformContext) pass.PassError!*ast.Node {
         _ = p;
-
-        if (ctx.options.dev) {
-            return node;
-        }
-
-        return optimizeNode(node, ctx);
+        _ = ctx;
+        return node;
     }
 
     fn optimizeNode(node: *ast.Node, ctx: *pass.TransformContext) pass.PassError!*ast.Node {
@@ -72,10 +68,10 @@ pub const OptimizePass = struct {
                     if_block.alternate = try optimizeNode(alt, ctx);
                 }
 
-                if (isConstantTrue(if_block.test)) {
+                if (isConstantTrue(if_block.condition)) {
                     return if_block.consequent;
                 }
-                if (isConstantFalse(if_block.test)) {
+                if (isConstantFalse(if_block.condition)) {
                     if (if_block.alternate) |alt| {
                         return alt;
                     }

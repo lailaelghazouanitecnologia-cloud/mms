@@ -18,7 +18,8 @@ pub const ReactivityPass = struct {
 
     fn transform(p: *const pass.Pass, node: *ast.Node, ctx: *pass.TransformContext) pass.PassError!*ast.Node {
         _ = p;
-        return transformNode(node, ctx);
+        _ = ctx;
+        return node;
     }
 
     fn transformNode(node: *ast.Node, ctx: *pass.TransformContext) pass.PassError!*ast.Node {

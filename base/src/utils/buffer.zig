@@ -15,11 +15,11 @@ pub const WriteBuffer = struct {
         };
     }
 
-    pub fn initWithIndent(allocator: std.mem.Allocator, indent: []const u8) Self {
+    pub fn initWithIndent(allocator: std.mem.Allocator, indent_str: []const u8) Self {
         return .{
             .data = std.ArrayList(u8).init(allocator),
             .indent_level = 0,
-            .indent_char = indent,
+            .indent_char = indent_str,
         };
     }
 
@@ -59,14 +59,8 @@ pub const WriteBuffer = struct {
 
     pub fn writeNumber(self: *Self, num: anytype) !void {
         var buf: [32]u8 = undefined;
-        const T = @TypeOf(num);
-        if (T == f64 or T == f32) {
-            const len = std.fmt.formatFloat(buf[0..], num, .{}) catch 0;
-            try self.write(buf[0..len]);
-        } else {
-            const slice = std.fmt.bufPrint(&buf, "{d}", .{num}) catch return;
-            try self.write(slice);
-        }
+        const slice = std.fmt.bufPrint(&buf, "{d}", .{num}) catch return;
+        try self.write(slice);
     }
 
     pub fn indent(self: *Self) void {

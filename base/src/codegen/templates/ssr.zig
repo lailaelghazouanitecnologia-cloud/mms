@@ -19,11 +19,11 @@ pub const SsrTemplate = struct {
         self.buf.deinit();
     }
 
-    pub fn generate(self: *Self, node: *ast.Node) ![]const u8 {
+    pub fn generate(self: *Self, node: *ast.Node) ![]u8 {
         try self.emitImports();
         try self.buf.writeLine("");
         try self.emitComponent(node);
-        return self.buf.items();
+        return try self.buf.toOwnedSlice();
     }
 
     fn emitImports(self: *Self) !void {
@@ -47,7 +47,7 @@ pub const SsrTemplate = struct {
         try self.buf.writeLine("}");
     }
 
-    fn emitTemplate(self: *Self, node: *ast.Node) !void {
+    fn emitTemplate(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         switch (node.node_type) {
             .fragment => {
                 for (node.data.fragment.children.items) |child| {
@@ -63,7 +63,7 @@ pub const SsrTemplate = struct {
         }
     }
 
-    fn emitElement(self: *Self, node: *ast.Node) !void {
+    fn emitElement(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const element = node.data.element;
 
         try self.buf.write("<");
@@ -120,11 +120,11 @@ pub const SsrTemplate = struct {
         try self.buf.write(")}");
     }
 
-    fn emitIfBlock(self: *Self, node: *ast.Node) !void {
+    fn emitIfBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const if_block = node.data.if_block;
 
         try self.buf.write("${");
-        try self.emitExpression(if_block.test);
+        try self.emitExpression(if_block.condition);
         try self.buf.write(" ? `");
         try self.emitTemplate(if_block.consequent);
         try self.buf.write("` : `");
@@ -134,7 +134,7 @@ pub const SsrTemplate = struct {
         try self.buf.write("`}");
     }
 
-    fn emitEachBlock(self: *Self, node: *ast.Node) !void {
+    fn emitEachBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const each = node.data.each_block;
 
         try self.buf.write("${");

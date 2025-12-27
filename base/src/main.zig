@@ -238,3 +238,18 @@ fn validateFile(allocator: std.mem.Allocator, filename: []const u8) !void {
         std.debug.print("Validation failed with {} errors.\n", .{result.errors.len});
     }
 }
+
+test {
+    _ = lexer;
+    _ = parser;
+    _ = ast;
+    _ = analyzer;
+    _ = validator;
+    _ = transformer;
+    _ = emitter;
+    _ = pipeline;
+    _ = context;
+    _ = utils;
+    _ = visitor;
+    _ = builder;
+}

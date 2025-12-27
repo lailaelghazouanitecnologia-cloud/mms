@@ -286,7 +286,7 @@ pub const Analyzer = struct {
     fn analyzeIfBlock(self: *Self, node: *ast.Node) AnalysisError!void {
         const if_block = node.data.if_block;
 
-        try self.analyzeNode(if_block.test);
+        try self.analyzeNode(if_block.condition);
 
         try self.analyzeNode(if_block.consequent);
 
@@ -634,10 +634,11 @@ fn isBuiltin(name: []const u8) bool {
 }
 
 test "analyzer basic" {
-    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var children = std.ArrayList(*ast.Node).init(allocator);
-    defer children.deinit();
 
     const fragment_data = ast.NodeData{
         .fragment = .{
@@ -652,7 +653,6 @@ test "analyzer basic" {
         ast.defaultSpan(),
         fragment_data,
     );
-    defer allocator.destroy(fragment);
 
     const root_data = ast.NodeData{
         .root = .{
@@ -671,11 +671,9 @@ test "analyzer basic" {
         ast.defaultSpan(),
         root_data,
     );
-    defer allocator.destroy(root);
 
-    var analyzer = try Analyzer.init(allocator, root, "");
-    const analysis = try analyzer.analyze();
-    defer allocator.destroy(analysis);
+    var a = try Analyzer.init(allocator, root, "");
+    const analysis = try a.analyze();
 
     try std.testing.expect(!analysis.has_script);
 }

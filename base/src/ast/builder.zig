@@ -10,10 +10,10 @@ pub const Builder = struct {
         return .{ .allocator = allocator };
     }
 
-    pub fn root(self: *Self, fragment: *nodes.Node) !*nodes.Node {
+    pub fn root(self: *Self, frag: *nodes.Node) !*nodes.Node {
         return nodes.createNode(self.allocator, .root, nodes.defaultSpan(), .{
             .root = .{
-                .fragment = fragment,
+                .fragment = frag,
                 .instance = null,
                 .module = null,
                 .options = null,
@@ -112,10 +112,10 @@ pub const Builder = struct {
     pub fn ifBlock(self: *Self, test_expr: *nodes.Node, consequent: *nodes.Node, alternate: ?*nodes.Node) !*nodes.Node {
         return nodes.createNode(self.allocator, .if_block, nodes.defaultSpan(), .{
             .if_block = .{
-                .test = test_expr,
+                .condition = test_expr,
                 .consequent = consequent,
                 .alternate = alternate,
-                .elseif = false,
+                .is_elseif = false,
             },
         });
     }
