@@ -277,7 +277,7 @@ pub const Parser = struct {
             {
                 const attr = try self.parseAttribute();
                 try attributes.append(attr);
-            } else if (token.type == .lbrace) {
+            } else if (token.type == .mustache_open) {
                 const spread = try self.parseSpreadAttribute();
                 try attributes.append(spread);
             } else {
@@ -516,14 +516,15 @@ pub const Parser = struct {
     }
 
     fn parseSpreadAttribute(self: *Self) ParseError!*ast.Node {
-        _ = self.advance();
-
-        if (self.check(.dot)) {
-            _ = self.advance();
-            _ = self.advance();
+        if (self.check(.mustache_open)) {
             _ = self.advance();
         }
 
+        if (self.check(.spread)) {
+            _ = self.advance();
+        }
+
+        self.skipWhitespace();
         const expr = try self.parseExpression();
 
         if (self.check(.mustache_close)) {
@@ -798,6 +799,10 @@ pub const Parser = struct {
         }
 
         const body = try self.parseFragment();
+
+        if (self.check(.block_close)) {
+            _ = self.advance();
+        }
 
         const snippet_data = ast.NodeData{
             .snippet_block = .{

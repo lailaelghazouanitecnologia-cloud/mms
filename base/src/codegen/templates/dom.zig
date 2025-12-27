@@ -142,6 +142,8 @@ pub const DomTemplate = struct {
                 try self.emitDirective(attr, id);
             } else if (attr.node_type == .attribute) {
                 try self.emitDynamicAttribute(attr, id);
+            } else if (attr.node_type == .spread_attribute) {
+                try self.emitSpreadAttribute(attr, id);
             }
         }
 
@@ -230,6 +232,16 @@ pub const DomTemplate = struct {
             },
             else => {},
         }
+    }
+
+    fn emitSpreadAttribute(self: *Self, node: *ast.Node, element_id: u32) !void {
+        const spread = node.data.spread_attribute;
+        try self.buf.writeIndent();
+        try self.buf.write("$.spread($$n_");
+        try self.buf.writeNumber(element_id);
+        try self.buf.write(", () => ");
+        try self.emitExpression(spread.expression);
+        try self.buf.writeLine(");");
     }
 
     fn emitDirective(self: *Self, node: *ast.Node, element_id: u32) !void {
@@ -552,13 +564,25 @@ pub const DomTemplate = struct {
         const render = node.data.render_tag;
 
         try self.buf.writeIndent();
-        try self.emitExpression(render.expression);
-        try self.buf.write("($$anchor");
-        if (render.argument) |arg| {
-            try self.buf.write(", ");
-            try self.emitExpression(arg);
+
+        if (render.expression.node_type == .call_expr) {
+            const call = render.expression.data.call_expr;
+            try self.emitExpression(call.callee);
+            try self.buf.write("($$anchor");
+            for (call.arguments.items) |arg| {
+                try self.buf.write(", ");
+                try self.emitExpression(arg);
+            }
+            try self.buf.writeLine(");");
+        } else {
+            try self.emitExpression(render.expression);
+            try self.buf.write("($$anchor");
+            if (render.argument) |arg| {
+                try self.buf.write(", ");
+                try self.emitExpression(arg);
+            }
+            try self.buf.writeLine(");");
         }
-        try self.buf.writeLine(");");
     }
 
     pub fn emitExpression(self: *Self, node: *ast.Node) !void {

@@ -211,12 +211,22 @@ pub const Lexer = struct {
                     try self.scanText(start_pos);
                 }
             },
-            '%', '?', '.', ',', ';', '@', '#' => {
+            '.' => {
+                if (self.in_mustache or self.in_tag) {
+                    if (self.match('.') and self.match('.')) {
+                        try self.tokens.append(.{ .type = .spread, .value = "...", .span = self.makeSpan(start_pos, self.pos) });
+                    } else {
+                        try self.tokens.append(.{ .type = .dot, .value = ".", .span = self.makeSpan(start_pos, self.pos) });
+                    }
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            '%', '?', ',', ';', '@', '#' => {
                 if (self.in_mustache or self.in_tag) {
                     const tok_type: ast.TokenType = switch (c) {
                         '%' => .percent,
                         '?' => .question,
-                        '.' => .dot,
                         ',' => .comma,
                         ';' => .semicolon,
                         '@' => .at,

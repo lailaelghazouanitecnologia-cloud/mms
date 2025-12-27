@@ -51,6 +51,7 @@ pub const TokenType = enum {
     question,
     colon,
     dot,
+    spread,
     comma,
     semicolon,
     pipe,
