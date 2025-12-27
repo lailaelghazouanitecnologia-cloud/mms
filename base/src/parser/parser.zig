@@ -208,6 +208,7 @@ pub const Parser = struct {
                 .whitespace, .newline => {
                     _ = self.advance();
                 },
+                .kw_else, .kw_then, .kw_catch, .block_close => break,
                 .eof => break,
                 else => {
                     _ = self.advance();
@@ -563,6 +564,10 @@ pub const Parser = struct {
             }
         }
 
+        if (self.check(.block_close)) {
+            _ = self.advance();
+        }
+
         const if_data = ast.NodeData{
             .if_block = .{
                 .condition = test_expr,
@@ -626,6 +631,10 @@ pub const Parser = struct {
                 _ = self.advance();
             }
             fallback = try self.parseFragment();
+        }
+
+        if (self.check(.block_close)) {
+            _ = self.advance();
         }
 
         const each_data = ast.NodeData{
