@@ -59,6 +59,7 @@ pub const SsrTemplate = struct {
             .expression_tag => try self.emitExpressionTag(node),
             .if_block => try self.emitIfBlock(node),
             .each_block => try self.emitEachBlock(node),
+            .await_block => try self.emitAwaitBlock(node),
             else => {},
         }
     }
@@ -171,6 +172,14 @@ pub const SsrTemplate = struct {
         }
 
         try self.buf.write("`).join('')}");
+    }
+
+    fn emitAwaitBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        const await_block = node.data.await_block;
+
+        if (await_block.pending) |pending| {
+            try self.emitTemplate(pending);
+        }
     }
 
     fn emitExpression(self: *Self, node: *ast.Node) !void {
