@@ -66,6 +66,12 @@ pub const SsrTemplate = struct {
     fn emitElement(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const element = node.data.element;
 
+        if (std.mem.eql(u8, element.name, "script") or std.mem.eql(u8, element.name, "style")) {
+            return;
+        }
+
+        const is_void = isVoidElement(element.name);
+
         try self.buf.write("<");
         try self.buf.write(element.name);
 
@@ -97,7 +103,7 @@ pub const SsrTemplate = struct {
             }
         }
 
-        if (element.self_closing) {
+        if (is_void) {
             try self.buf.write(" />");
         } else {
             try self.buf.write(">");
@@ -108,6 +114,17 @@ pub const SsrTemplate = struct {
             try self.buf.write(element.name);
             try self.buf.write(">");
         }
+    }
+
+    fn isVoidElement(name: []const u8) bool {
+        const void_elements = [_][]const u8{
+            "area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr",
+        };
+        for (void_elements) |ve| {
+            if (std.mem.eql(u8, name, ve)) return true;
+        }
+        return false;
     }
 
     fn emitText(self: *Self, node: *ast.Node) !void {
