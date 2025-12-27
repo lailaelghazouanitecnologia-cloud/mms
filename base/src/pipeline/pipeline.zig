@@ -41,6 +41,10 @@ pub const Pipeline = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.analysis) |a| {
+            a.deinit();
+            self.allocator.destroy(a);
+        }
         self.ctx.deinit();
         self.allocator.destroy(self.ctx);
     }
@@ -48,33 +52,29 @@ pub const Pipeline = struct {
     pub fn run(self: *Self) !CompileOutput {
         self.lex() catch {
             try self.ctx.addError("lex-error", "Lexer failed", ast.defaultSpan());
-            return self.buildOutput("", null, null);
+            return try self.buildOutput("", null, null);
         };
 
         self.parse() catch {
             try self.ctx.addError("parse-error", "Parser failed", ast.defaultSpan());
-            return self.buildOutput("", null, null);
+            return try self.buildOutput("", null, null);
         };
 
-        // self.analyze() catch |err| {
-        //     std.debug.print("Analyze error: {}\n", .{err});
-        // };
+        self.analyze() catch {};
 
-        // self.validate() catch |err| {
-        //     std.debug.print("Validate error: {}\n", .{err});
-        // };
+        self.validate() catch {};
 
         if (self.ctx.hasErrors()) {
-            return self.buildOutput("", null, null);
+            return try self.buildOutput("", null, null);
         }
 
-        // self.transform() catch {};
+        self.transform() catch {};
 
         const emit_result = self.emit() catch {
-            return self.buildOutput("", null, null);
+            return try self.buildOutput("", null, null);
         };
 
-        return self.buildOutput(emit_result.js, emit_result.css, emit_result.source_map);
+        return try self.buildOutput(emit_result.js, emit_result.css, emit_result.source_map);
     }
 
     fn lex(self: *Self) !void {
@@ -143,7 +143,7 @@ pub const Pipeline = struct {
         return try e.emit();
     }
 
-    fn buildOutput(self: *Self, js: []const u8, css: ?[]const u8, source_map: ?[]const u8) CompileOutput {
+    fn buildOutput(self: *Self, js: []const u8, css: ?[]const u8, source_map: ?[]const u8) !CompileOutput {
         var metadata = CompileOutput.Metadata{};
 
         if (self.analysis) |a| {
@@ -159,12 +159,15 @@ pub const Pipeline = struct {
             };
         }
 
+        const warnings = try self.allocator.dupe(context.Diagnostic, self.ctx.diagnostics.warnings.items);
+        const errors = try self.allocator.dupe(context.Diagnostic, self.ctx.diagnostics.errors.items);
+
         return .{
             .js = js,
             .css = css,
             .source_map = source_map,
-            .warnings = self.ctx.diagnostics.warnings.items,
-            .errors = self.ctx.diagnostics.errors.items,
+            .warnings = warnings,
+            .errors = errors,
             .metadata = metadata,
         };
     }

@@ -129,7 +129,11 @@ fn parseArgs(args: []const []const u8) CliOptions {
     return options;
 }
 
-fn compileFile(allocator: std.mem.Allocator, filename: []const u8, cli_options: CliOptions) !void {
+fn compileFile(base_allocator: std.mem.Allocator, filename: []const u8, cli_options: CliOptions) !void {
+    var arena = std.heap.ArenaAllocator.init(base_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const file = std.fs.cwd().openFile(filename, .{}) catch |err| {
         std.debug.print("Error opening file '{s}': {}\n", .{ filename, err });
         return;
@@ -140,7 +144,6 @@ fn compileFile(allocator: std.mem.Allocator, filename: []const u8, cli_options: 
         std.debug.print("Error reading file: {}\n", .{err});
         return;
     };
-    defer allocator.free(source);
 
     const options = CompilerOptions{
         .dev = cli_options.dev,
@@ -179,7 +182,11 @@ fn compileFile(allocator: std.mem.Allocator, filename: []const u8, cli_options: 
     }
 }
 
-fn parseFile(allocator: std.mem.Allocator, filename: []const u8) !void {
+fn parseFile(base_allocator: std.mem.Allocator, filename: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(base_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const file = std.fs.cwd().openFile(filename, .{}) catch |err| {
         std.debug.print("Error opening file '{s}': {}\n", .{ filename, err });
         return;
@@ -190,7 +197,6 @@ fn parseFile(allocator: std.mem.Allocator, filename: []const u8) !void {
         std.debug.print("Error reading file: {}\n", .{err});
         return;
     };
-    defer allocator.free(source);
 
     const ast_root = parse(allocator, source) catch |err| {
         std.debug.print("Parse error: {}\n", .{err});
@@ -201,7 +207,11 @@ fn parseFile(allocator: std.mem.Allocator, filename: []const u8) !void {
     std.debug.print("Parse successful!\n", .{});
 }
 
-fn validateFile(allocator: std.mem.Allocator, filename: []const u8) !void {
+fn validateFile(base_allocator: std.mem.Allocator, filename: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(base_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const file = std.fs.cwd().openFile(filename, .{}) catch |err| {
         std.debug.print("Error opening file '{s}': {}\n", .{ filename, err });
         return;
@@ -212,7 +222,6 @@ fn validateFile(allocator: std.mem.Allocator, filename: []const u8) !void {
         std.debug.print("Error reading file: {}\n", .{err});
         return;
     };
-    defer allocator.free(source);
 
     const ast_root = parse(allocator, source) catch |err| {
         std.debug.print("Parse error: {}\n", .{err});
