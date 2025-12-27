@@ -6,6 +6,7 @@ pub const builder = @import("ast/builder.zig");
 
 pub const lexer = @import("lexer/lexer.zig");
 pub const parser = @import("parser/parser.zig");
+pub const analyzer = @import("analyzer/analyzer.zig");
 pub const validator = @import("validators/validator.zig");
 pub const transformer = @import("transformers/transformer.zig");
 pub const emitter = @import("codegen/emitter.zig");
