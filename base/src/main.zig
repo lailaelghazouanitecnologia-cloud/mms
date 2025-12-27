@@ -1,49 +1,27 @@
 const std = @import("std");
 
 pub const ast = @import("ast/nodes.zig");
+pub const visitor = @import("ast/visitor.zig");
+pub const builder = @import("ast/builder.zig");
+
 pub const lexer = @import("lexer/lexer.zig");
 pub const parser = @import("parser/parser.zig");
-pub const analyzer = @import("analyzer/analyzer.zig");
-pub const codegen = @import("codegen/codegen.zig");
+pub const validator = @import("validators/validator.zig");
+pub const transformer = @import("transformers/transformer.zig");
+pub const emitter = @import("codegen/emitter.zig");
 
-pub const CompileOptions = struct {
-    generate: codegen.GenerateMode = .dom,
-    dev: bool = false,
-    hmr: bool = false,
-    source_maps: bool = false,
-    preserve_comments: bool = false,
-    preserve_whitespace: bool = false,
-    css_hash: ?[]const u8 = null,
-    filename: ?[]const u8 = null,
-};
+pub const pipeline = @import("pipeline/pipeline.zig");
+pub const context = @import("pipeline/context.zig");
+pub const stage = @import("pipeline/stage.zig");
 
-pub const CompileResult = codegen.CompileResult;
+pub const utils = @import("utils/utils.zig");
 
-pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: CompileOptions) !CompileResult {
-    var lex = lexer.Lexer.init(allocator, source);
-    defer lex.deinit();
-    const tokens = try lex.tokenize();
+pub const CompilerOptions = context.CompilerOptions;
+pub const CompileOutput = pipeline.CompileOutput;
+pub const GenerateMode = context.GenerateMode;
 
-    var parse = parser.Parser.init(allocator, tokens);
-    defer parse.deinit();
-    const ast_root = try parse.parse();
-
-    var analyze = try analyzer.Analyzer.init(allocator, ast_root, source);
-    const analysis = try analyze.analyze();
-
-    var gen = codegen.CodeGenerator.init(allocator, analysis, .{
-        .dev = options.dev,
-        .hmr = options.hmr,
-        .generate = options.generate,
-        .source_maps = options.source_maps,
-        .preserve_comments = options.preserve_comments,
-        .preserve_whitespace = options.preserve_whitespace,
-        .css_hash = options.css_hash,
-        .filename = options.filename,
-    });
-    defer gen.deinit();
-
-    return try gen.generate();
+pub fn compile(allocator: std.mem.Allocator, source: []const u8, options: CompilerOptions) !CompileOutput {
+    return pipeline.compile(allocator, source, options);
 }
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) !*ast.Node {
@@ -85,6 +63,13 @@ pub fn main() !void {
         }
         const input_file = args[2];
         try parseFile(allocator, input_file);
+    } else if (std.mem.eql(u8, command, "validate")) {
+        if (args.len < 3) {
+            std.debug.print("Error: No input file specified\n", .{});
+            return;
+        }
+        const input_file = args[2];
+        try validateFile(allocator, input_file);
     } else if (std.mem.eql(u8, command, "version") or std.mem.eql(u8, command, "-v")) {
         std.debug.print("mms 0.3.0\n", .{});
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "-h")) {
@@ -104,6 +89,7 @@ fn printUsage() !void {
         \\Commands:
         \\  compile, c <file>    Compile a component file
         \\  parse <file>         Parse a file and print AST
+        \\  validate <file>      Validate a component file
         \\  version, -v          Print version
         \\  help, -h             Print this help
         \\
@@ -158,7 +144,7 @@ fn compileFile(allocator: std.mem.Allocator, filename: []const u8, cli_options: 
     };
     defer allocator.free(source);
 
-    const options = CompileOptions{
+    const options = CompilerOptions{
         .dev = cli_options.dev,
         .generate = if (cli_options.ssr) .ssr else .dom,
         .source_maps = cli_options.sourcemap,
@@ -215,4 +201,42 @@ fn parseFile(allocator: std.mem.Allocator, filename: []const u8) !void {
 
     std.debug.print("AST Root: {}\n", .{ast_root.node_type});
     std.debug.print("Parse successful!\n", .{});
+}
+
+fn validateFile(allocator: std.mem.Allocator, filename: []const u8) !void {
+    const file = std.fs.cwd().openFile(filename, .{}) catch |err| {
+        std.debug.print("Error opening file '{s}': {}\n", .{ filename, err });
+        return;
+    };
+    defer file.close();
+
+    const source = file.readToEndAlloc(allocator, 1024 * 1024 * 10) catch |err| {
+        std.debug.print("Error reading file: {}\n", .{err});
+        return;
+    };
+    defer allocator.free(source);
+
+    const ast_root = parse(allocator, source) catch |err| {
+        std.debug.print("Parse error: {}\n", .{err});
+        return;
+    };
+
+    var v = try validator.Validator.init(allocator, ast_root, source);
+    defer v.deinit();
+
+    const result = try v.validate();
+
+    for (result.warnings) |warning| {
+        std.debug.print("Warning [{s}]: {s}\n", .{ warning.code, warning.message });
+    }
+
+    for (result.errors) |err| {
+        std.debug.print("Error [{s}]: {s}\n", .{ err.code, err.message });
+    }
+
+    if (result.valid) {
+        std.debug.print("Validation passed!\n", .{});
+    } else {
+        std.debug.print("Validation failed with {} errors.\n", .{result.errors.len});
+    }
 }

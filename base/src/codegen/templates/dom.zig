@@ -1,0 +1,529 @@
+const std = @import("std");
+const ast = @import("../../ast/nodes.zig");
+const buffer = @import("../../utils/buffer.zig");
+
+pub const DomTemplate = struct {
+    buf: buffer.WriteBuffer,
+    allocator: std.mem.Allocator,
+    template_count: u32,
+    block_count: u32,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .buf = buffer.WriteBuffer.init(allocator),
+            .allocator = allocator,
+            .template_count = 0,
+            .block_count = 0,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.buf.deinit();
+    }
+
+    pub fn generate(self: *Self, node: *ast.Node) ![]const u8 {
+        try self.emitImports();
+        try self.buf.writeLine("");
+        try self.emitComponent(node);
+        return self.buf.items();
+    }
+
+    fn emitImports(self: *Self) !void {
+        try self.buf.writeLine("import * as $ from 'mms/internal/client';");
+    }
+
+    fn emitComponent(self: *Self, node: *ast.Node) !void {
+        try self.buf.writeLine("export default function Component($$anchor, $$props) {");
+        self.buf.indent();
+
+        if (node.node_type == .root) {
+            try self.emitNode(node.data.root.fragment);
+        }
+
+        self.buf.dedent();
+        try self.buf.writeLine("}");
+    }
+
+    pub fn emitNode(self: *Self, node: *ast.Node) !void {
+        switch (node.node_type) {
+            .fragment => {
+                for (node.data.fragment.children.items) |child| {
+                    try self.emitNode(child);
+                }
+            },
+            .element => try self.emitElement(node),
+            .component => try self.emitComponentUsage(node),
+            .text_node => try self.emitText(node),
+            .expression_tag => try self.emitExpressionTag(node),
+            .if_block => try self.emitIfBlock(node),
+            .each_block => try self.emitEachBlock(node),
+            .await_block => try self.emitAwaitBlock(node),
+            .key_block => try self.emitKeyBlock(node),
+            .snippet_block => try self.emitSnippet(node),
+            .html_tag => try self.emitHtmlTag(node),
+            .render_tag => try self.emitRenderTag(node),
+            else => {},
+        }
+    }
+
+    fn emitElement(self: *Self, node: *ast.Node) !void {
+        const element = node.data.element;
+        const id = self.template_count;
+        self.template_count += 1;
+
+        try self.buf.writeIndent();
+        try self.buf.write("var $$t_");
+        try self.buf.writeNumber(id);
+        try self.buf.write(" = $.template(`<");
+        try self.buf.write(element.name);
+
+        for (element.attributes.items) |attr| {
+            if (attr.node_type == .attribute) {
+                try self.emitStaticAttribute(attr);
+            }
+        }
+
+        if (element.self_closing) {
+            try self.buf.writeLine(" />`);");
+        } else {
+            try self.buf.writeLine(">`);");
+        }
+
+        try self.buf.writeIndent();
+        try self.buf.write("var $$n_");
+        try self.buf.writeNumber(id);
+        try self.buf.write(" = $.open($$anchor, $$t_");
+        try self.buf.writeNumber(id);
+        try self.buf.writeLine(");");
+
+        for (element.attributes.items) |attr| {
+            if (attr.node_type == .directive) {
+                try self.emitDirective(attr, id);
+            } else if (attr.node_type == .attribute) {
+                try self.emitDynamicAttribute(attr, id);
+            }
+        }
+
+        if (!element.self_closing) {
+            for (element.children.items) |child| {
+                try self.emitNode(child);
+            }
+        }
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.close($$anchor, $$n_");
+        try self.buf.writeNumber(id);
+        try self.buf.writeLine(");");
+    }
+
+    fn emitStaticAttribute(self: *Self, node: *ast.Node) !void {
+        const attr = node.data.attribute;
+        switch (attr.value) {
+            .text => |text| {
+                try self.buf.write(" ");
+                try self.buf.write(attr.name);
+                try self.buf.write("=\"");
+                try self.buf.write(text);
+                try self.buf.write("\"");
+            },
+            .boolean => |val| {
+                if (val) {
+                    try self.buf.write(" ");
+                    try self.buf.write(attr.name);
+                }
+            },
+            else => {},
+        }
+    }
+
+    fn emitDynamicAttribute(self: *Self, node: *ast.Node, element_id: u32) !void {
+        const attr = node.data.attribute;
+        switch (attr.value) {
+            .expression => |expr| {
+                try self.buf.writeIndent();
+                try self.buf.write("$.attr($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.buf.write(", \"");
+                try self.buf.write(attr.name);
+                try self.buf.write("\", () => ");
+                try self.emitExpression(expr);
+                try self.buf.writeLine(");");
+            },
+            else => {},
+        }
+    }
+
+    fn emitDirective(self: *Self, node: *ast.Node, element_id: u32) !void {
+        const dir = node.data.directive;
+
+        switch (dir.directive_type) {
+            .on => {
+                try self.buf.writeIndent();
+                try self.buf.write("$.on($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.buf.write(", \"");
+                try self.buf.write(dir.name);
+                try self.buf.write("\", ");
+                if (dir.expression) |expr| {
+                    try self.emitExpression(expr);
+                } else {
+                    try self.buf.write("() => {}");
+                }
+                try self.buf.writeLine(");");
+            },
+            .bind => {
+                try self.buf.writeIndent();
+                try self.buf.write("$.bind_");
+                try self.buf.write(dir.name);
+                try self.buf.write("($$n_");
+                try self.buf.writeNumber(element_id);
+                if (dir.expression) |expr| {
+                    try self.buf.write(", () => ");
+                    try self.emitExpression(expr);
+                    try self.buf.write(", v => ");
+                    try self.emitExpression(expr);
+                    try self.buf.write(" = v");
+                }
+                try self.buf.writeLine(");");
+            },
+            .class_directive => {
+                try self.buf.writeIndent();
+                try self.buf.write("$.toggle_class($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.buf.write(", \"");
+                try self.buf.write(dir.name);
+                try self.buf.write("\", () => ");
+                if (dir.expression) |expr| {
+                    try self.emitExpression(expr);
+                } else {
+                    try self.buf.write("true");
+                }
+                try self.buf.writeLine(");");
+            },
+            else => {},
+        }
+    }
+
+    fn emitComponentUsage(self: *Self, node: *ast.Node) !void {
+        const comp = node.data.component;
+
+        try self.buf.writeIndent();
+        try self.buf.write(comp.name);
+        try self.buf.write("($$anchor, {");
+
+        var first = true;
+        for (comp.attributes.items) |attr| {
+            if (attr.node_type == .attribute) {
+                if (!first) try self.buf.write(", ");
+                first = false;
+                try self.buf.write(attr.data.attribute.name);
+                try self.buf.write(": ");
+                switch (attr.data.attribute.value) {
+                    .text => |text| {
+                        try self.buf.write("\"");
+                        try self.buf.write(text);
+                        try self.buf.write("\"");
+                    },
+                    .expression => |expr| try self.emitExpression(expr),
+                    .boolean => |val| try self.buf.write(if (val) "true" else "false"),
+                    else => {},
+                }
+            }
+        }
+
+        try self.buf.writeLine("});");
+    }
+
+    fn emitText(self: *Self, node: *ast.Node) !void {
+        const text = node.data.text_node;
+        const trimmed = std.mem.trim(u8, text.data, " \t\n\r");
+        if (trimmed.len == 0) return;
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.text($$anchor, `");
+        try self.buf.write(text.data);
+        try self.buf.writeLine("`);");
+    }
+
+    fn emitExpressionTag(self: *Self, node: *ast.Node) !void {
+        const id = self.template_count;
+        self.template_count += 1;
+
+        try self.buf.writeIndent();
+        try self.buf.write("var $$text_");
+        try self.buf.writeNumber(id);
+        try self.buf.writeLine(" = $.text($$anchor);");
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.template_effect(() => $.set_text($$text_");
+        try self.buf.writeNumber(id);
+        try self.buf.write(", ");
+        try self.emitExpression(node.data.expression_tag.expression);
+        try self.buf.writeLine("));");
+    }
+
+    fn emitIfBlock(self: *Self, node: *ast.Node) !void {
+        const if_block = node.data.if_block;
+        const id = self.block_count;
+        self.block_count += 1;
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.if($$anchor, () => ");
+        try self.emitExpression(if_block.test);
+        try self.buf.writeLine(", ($$anchor) => {");
+
+        self.buf.indent();
+        try self.emitNode(if_block.consequent);
+        self.buf.dedent();
+
+        try self.buf.writeIndent();
+        try self.buf.write("}");
+
+        if (if_block.alternate) |alt| {
+            try self.buf.writeLine(", ($$anchor) => {");
+            self.buf.indent();
+            try self.emitNode(alt);
+            self.buf.dedent();
+            try self.buf.writeIndent();
+            try self.buf.write("}");
+        }
+
+        try self.buf.writeLine(");");
+        _ = id;
+    }
+
+    fn emitEachBlock(self: *Self, node: *ast.Node) !void {
+        const each = node.data.each_block;
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.each($$anchor, () => ");
+        try self.emitExpression(each.expression);
+        try self.buf.write(", (");
+        try self.emitExpression(each.context);
+        if (each.index) |idx| {
+            try self.buf.write(", ");
+            try self.buf.write(idx);
+        }
+        try self.buf.writeLine(") => {");
+
+        self.buf.indent();
+        for (each.children.items) |child| {
+            try self.emitNode(child);
+        }
+        self.buf.dedent();
+
+        try self.buf.writeIndent();
+        try self.buf.write("}");
+
+        if (each.fallback) |fb| {
+            try self.buf.writeLine(", () => {");
+            self.buf.indent();
+            try self.emitNode(fb);
+            self.buf.dedent();
+            try self.buf.writeIndent();
+            try self.buf.write("}");
+        }
+
+        try self.buf.writeLine(");");
+    }
+
+    fn emitAwaitBlock(self: *Self, node: *ast.Node) !void {
+        const await_block = node.data.await_block;
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.await($$anchor, () => ");
+        try self.emitExpression(await_block.expression);
+        try self.buf.writeLine(", {");
+        self.buf.indent();
+
+        if (await_block.pending) |pending| {
+            try self.buf.writeIndentedLine("pending: ($$anchor) => {");
+            self.buf.indent();
+            try self.emitNode(pending);
+            self.buf.dedent();
+            try self.buf.writeIndentedLine("},");
+        }
+
+        if (await_block.then_node) |then_node| {
+            try self.buf.writeIndent();
+            try self.buf.write("then: ($$anchor, ");
+            if (await_block.value) |v| {
+                try self.emitExpression(v);
+            } else {
+                try self.buf.write("_");
+            }
+            try self.buf.writeLine(") => {");
+            self.buf.indent();
+            try self.emitNode(then_node);
+            self.buf.dedent();
+            try self.buf.writeIndentedLine("},");
+        }
+
+        if (await_block.catch_node) |catch_node| {
+            try self.buf.writeIndent();
+            try self.buf.write("catch: ($$anchor, ");
+            if (await_block.error_node) |e| {
+                try self.emitExpression(e);
+            } else {
+                try self.buf.write("_");
+            }
+            try self.buf.writeLine(") => {");
+            self.buf.indent();
+            try self.emitNode(catch_node);
+            self.buf.dedent();
+            try self.buf.writeIndentedLine("},");
+        }
+
+        self.buf.dedent();
+        try self.buf.writeIndentedLine("});");
+    }
+
+    fn emitKeyBlock(self: *Self, node: *ast.Node) !void {
+        const key_block = node.data.key_block;
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.key($$anchor, () => ");
+        try self.emitExpression(key_block.expression);
+        try self.buf.writeLine(", ($$anchor) => {");
+
+        self.buf.indent();
+        for (key_block.children.items) |child| {
+            try self.emitNode(child);
+        }
+        self.buf.dedent();
+
+        try self.buf.writeIndentedLine("});");
+    }
+
+    fn emitSnippet(self: *Self, node: *ast.Node) !void {
+        const snippet = node.data.snippet_block;
+
+        try self.buf.writeIndent();
+        try self.buf.write("function ");
+        try self.buf.write(snippet.name);
+        try self.buf.write("($$anchor");
+        for (snippet.parameters.items) |param| {
+            try self.buf.write(", ");
+            try self.emitExpression(param);
+        }
+        try self.buf.writeLine(") {");
+
+        self.buf.indent();
+        try self.emitNode(snippet.body);
+        self.buf.dedent();
+
+        try self.buf.writeIndentedLine("}");
+    }
+
+    fn emitHtmlTag(self: *Self, node: *ast.Node) !void {
+        try self.buf.writeIndent();
+        try self.buf.write("$.html($$anchor, () => ");
+        try self.emitExpression(node.data.html_tag.expression);
+        try self.buf.writeLine(");");
+    }
+
+    fn emitRenderTag(self: *Self, node: *ast.Node) !void {
+        const render = node.data.render_tag;
+
+        try self.buf.writeIndent();
+        try self.emitExpression(render.expression);
+        try self.buf.write("($$anchor");
+        if (render.argument) |arg| {
+            try self.buf.write(", ");
+            try self.emitExpression(arg);
+        }
+        try self.buf.writeLine(");");
+    }
+
+    pub fn emitExpression(self: *Self, node: *ast.Node) !void {
+        switch (node.node_type) {
+            .identifier_expr => try self.buf.write(node.data.identifier_expr.name),
+            .literal_expr => {
+                const lit = node.data.literal_expr;
+                switch (lit.value) {
+                    .string => |s| {
+                        try self.buf.write("\"");
+                        try self.buf.write(s);
+                        try self.buf.write("\"");
+                    },
+                    .number => |n| try self.buf.writeNumber(n),
+                    .boolean => |b| try self.buf.write(if (b) "true" else "false"),
+                    .null_val => try self.buf.write("null"),
+                }
+            },
+            .member_expr => {
+                const m = node.data.member_expr;
+                try self.emitExpression(m.object);
+                if (m.computed) {
+                    try self.buf.write("[");
+                    try self.emitExpression(m.property);
+                    try self.buf.write("]");
+                } else {
+                    try self.buf.write(".");
+                    try self.emitExpression(m.property);
+                }
+            },
+            .call_expr => {
+                const c = node.data.call_expr;
+                try self.emitExpression(c.callee);
+                try self.buf.write("(");
+                for (c.arguments.items, 0..) |arg, i| {
+                    if (i > 0) try self.buf.write(", ");
+                    try self.emitExpression(arg);
+                }
+                try self.buf.write(")");
+            },
+            .binary_expr => {
+                const b = node.data.binary_expr;
+                try self.buf.write("(");
+                try self.emitExpression(b.left);
+                try self.buf.write(" ");
+                try self.buf.write(b.operator);
+                try self.buf.write(" ");
+                try self.emitExpression(b.right);
+                try self.buf.write(")");
+            },
+            .unary_expr => {
+                const u = node.data.unary_expr;
+                if (u.prefix) {
+                    try self.buf.write(u.operator);
+                    try self.emitExpression(u.argument);
+                } else {
+                    try self.emitExpression(u.argument);
+                    try self.buf.write(u.operator);
+                }
+            },
+            .conditional_expr => {
+                const c = node.data.conditional_expr;
+                try self.buf.write("(");
+                try self.emitExpression(c.test);
+                try self.buf.write(" ? ");
+                try self.emitExpression(c.consequent);
+                try self.buf.write(" : ");
+                try self.emitExpression(c.alternate);
+                try self.buf.write(")");
+            },
+            .array_expr => {
+                const a = node.data.array_expr;
+                try self.buf.write("[");
+                for (a.elements.items, 0..) |elem, i| {
+                    if (i > 0) try self.buf.write(", ");
+                    if (elem) |e| try self.emitExpression(e);
+                }
+                try self.buf.write("]");
+            },
+            .object_expr => {
+                const o = node.data.object_expr;
+                try self.buf.write("{");
+                for (o.properties.items, 0..) |prop, i| {
+                    if (i > 0) try self.buf.write(", ");
+                    try self.emitExpression(prop);
+                }
+                try self.buf.write("}");
+            },
+            else => {},
+        }
+    }
+};
