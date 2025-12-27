@@ -204,19 +204,65 @@ pub const Lexer = struct {
                     try self.tokens.append(.{ .type = .minus, .value = "-", .span = self.makeSpan(start_pos, self.pos) });
                 }
             },
-            '*' => try self.tokens.append(.{ .type = .star, .value = "*", .span = self.makeSpan(start_pos, self.pos) }),
-            '%' => try self.tokens.append(.{ .type = .percent, .value = "%", .span = self.makeSpan(start_pos, self.pos) }),
-            '?' => try self.tokens.append(.{ .type = .question, .value = "?", .span = self.makeSpan(start_pos, self.pos) }),
-            ':' => try self.tokens.append(.{ .type = .colon, .value = ":", .span = self.makeSpan(start_pos, self.pos) }),
-            '.' => try self.tokens.append(.{ .type = .dot, .value = ".", .span = self.makeSpan(start_pos, self.pos) }),
-            ',' => try self.tokens.append(.{ .type = .comma, .value = ",", .span = self.makeSpan(start_pos, self.pos) }),
-            ';' => try self.tokens.append(.{ .type = .semicolon, .value = ";", .span = self.makeSpan(start_pos, self.pos) }),
-            '(' => try self.tokens.append(.{ .type = .lparen, .value = "(", .span = self.makeSpan(start_pos, self.pos) }),
-            ')' => try self.tokens.append(.{ .type = .rparen, .value = ")", .span = self.makeSpan(start_pos, self.pos) }),
-            '[' => try self.tokens.append(.{ .type = .lbracket, .value = "[", .span = self.makeSpan(start_pos, self.pos) }),
-            ']' => try self.tokens.append(.{ .type = .rbracket, .value = "]", .span = self.makeSpan(start_pos, self.pos) }),
-            '@' => try self.tokens.append(.{ .type = .at, .value = "@", .span = self.makeSpan(start_pos, self.pos) }),
-            '#' => try self.tokens.append(.{ .type = .hash, .value = "#", .span = self.makeSpan(start_pos, self.pos) }),
+            '*' => {
+                if (self.in_mustache or self.in_tag) {
+                    try self.tokens.append(.{ .type = .star, .value = "*", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            '%', '?', '.', ',', ';', '@', '#' => {
+                if (self.in_mustache or self.in_tag) {
+                    const tok_type: ast.TokenType = switch (c) {
+                        '%' => .percent,
+                        '?' => .question,
+                        '.' => .dot,
+                        ',' => .comma,
+                        ';' => .semicolon,
+                        '@' => .at,
+                        '#' => .hash,
+                        else => .error_token,
+                    };
+                    try self.tokens.append(.{ .type = tok_type, .value = self.source[start_pos..self.pos], .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            ':' => {
+                if (self.in_mustache or self.in_tag) {
+                    try self.tokens.append(.{ .type = .colon, .value = ":", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            '(' => {
+                if (self.in_mustache or self.in_tag) {
+                    try self.tokens.append(.{ .type = .lparen, .value = "(", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            ')' => {
+                if (self.in_mustache or self.in_tag) {
+                    try self.tokens.append(.{ .type = .rparen, .value = ")", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            '[' => {
+                if (self.in_mustache or self.in_tag) {
+                    try self.tokens.append(.{ .type = .lbracket, .value = "[", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            ']' => {
+                if (self.in_mustache or self.in_tag) {
+                    try self.tokens.append(.{ .type = .rbracket, .value = "]", .span = self.makeSpan(start_pos, self.pos) });
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
             '"', '\'' => try self.scanString(c, start_pos),
             '\n' => {
                 self.line += 1;
@@ -405,6 +451,7 @@ pub const Lexer = struct {
         if (std.mem.eql(u8, keyword, "render")) try self.tokens.append(.{ .type = .kw_render, .value = "{@render", .span = self.makeSpan(start_pos, self.pos) });
         if (std.mem.eql(u8, keyword, "const")) try self.tokens.append(.{ .type = .kw_const, .value = "{@const", .span = self.makeSpan(start_pos, self.pos) });
         if (std.mem.eql(u8, keyword, "debug")) try self.tokens.append(.{ .type = .kw_debug, .value = "{@debug", .span = self.makeSpan(start_pos, self.pos) });
+        self.in_mustache = true;
     }
 
     fn scanScriptContent(self: *Self, start_pos: u32) !void {
