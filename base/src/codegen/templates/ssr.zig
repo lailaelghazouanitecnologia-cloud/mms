@@ -6,6 +6,7 @@ pub const SsrTemplate = struct {
     buf: buffer.WriteBuffer,
     allocator: std.mem.Allocator,
     scope_id: ?*const [8]u8,
+    effect_depth: u32,
 
     const Self = @This();
 
@@ -14,6 +15,7 @@ pub const SsrTemplate = struct {
             .buf = buffer.WriteBuffer.init(allocator),
             .allocator = allocator,
             .scope_id = null,
+            .effect_depth = 0,
         };
     }
 
@@ -94,12 +96,39 @@ pub const SsrTemplate = struct {
     }
 
     fn emitTransformedLine(self: *Self, line: []const u8) !void {
+        if (std.mem.indexOf(u8, line, "$effect(") != null) {
+            self.effect_depth += 1;
+            return;
+        }
+
+        if (self.effect_depth > 0) {
+            if (std.mem.indexOf(u8, line, "});") != null) {
+                self.effect_depth -= 1;
+            }
+            return;
+        }
+
+        if (std.mem.indexOf(u8, line, "$inspect(") != null) {
+            return;
+        }
+
         if (std.mem.indexOf(u8, line, "$props()")) |idx| {
             try self.buf.write(line[0..idx]);
             try self.buf.write("$$props");
             const after_props = idx + 8;
             if (after_props < line.len) {
                 try self.buf.write(line[after_props..]);
+            }
+        } else if (std.mem.indexOf(u8, line, "$bindable(")) |idx| {
+            try self.buf.write(line[0..idx]);
+            const after = idx + 10;
+            if (after < line.len) {
+                if (std.mem.lastIndexOf(u8, line, ");")) |close_idx| {
+                    try self.buf.write(line[after..close_idx]);
+                    try self.buf.write(";");
+                } else {
+                    try self.buf.write(line[after..]);
+                }
             }
         } else if (std.mem.indexOf(u8, line, "$state(")) |idx| {
             try self.buf.write(line[0..idx]);
@@ -123,12 +152,6 @@ pub const SsrTemplate = struct {
                     try self.buf.write(line[after..]);
                 }
             }
-        } else if (std.mem.startsWith(u8, line, "$effect(")) {
-            return;
-        } else if (std.mem.indexOf(u8, line, "$effect(") != null) {
-            return;
-        } else if (std.mem.startsWith(u8, line, "});")) {
-            return;
         } else if (std.mem.eql(u8, line, "]);")) {
             try self.buf.write("];");
         } else {
