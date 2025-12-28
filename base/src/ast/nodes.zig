@@ -49,6 +49,8 @@ pub const TokenType = enum {
     or_op,
     not,
     question,
+    optional_chain,
+    nullish_coalesce,
     colon,
     dot,
     spread,
@@ -462,6 +464,7 @@ pub const MemberExpr = struct {
     object: *Node,
     property: *Node,
     computed: bool,
+    optional: bool = false,
 };
 
 pub const CallExpr = struct {

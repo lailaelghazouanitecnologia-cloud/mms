@@ -240,11 +240,23 @@ pub const Lexer = struct {
                     try self.scanText(start_pos);
                 }
             },
-            '%', '?', ',', ';', '@', '#' => {
+            '?' => {
+                if (self.in_mustache or self.in_tag) {
+                    if (self.match('.')) {
+                        try self.tokens.append(.{ .type = .optional_chain, .value = "?.", .span = self.makeSpan(start_pos, self.pos) });
+                    } else if (self.match('?')) {
+                        try self.tokens.append(.{ .type = .nullish_coalesce, .value = "??", .span = self.makeSpan(start_pos, self.pos) });
+                    } else {
+                        try self.tokens.append(.{ .type = .question, .value = "?", .span = self.makeSpan(start_pos, self.pos) });
+                    }
+                } else {
+                    try self.scanText(start_pos);
+                }
+            },
+            '%', ',', ';', '@', '#' => {
                 if (self.in_mustache or self.in_tag) {
                     const tok_type: ast.TokenType = switch (c) {
                         '%' => .percent,
-                        '?' => .question,
                         ',' => .comma,
                         ';' => .semicolon,
                         '@' => .at,

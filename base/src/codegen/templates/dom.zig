@@ -182,6 +182,7 @@ pub const DomTemplate = struct {
             .svelte_body => try self.emitSvelteBody(node),
             .svelte_document => try self.emitSvelteDocument(node),
             .svelte_element => try self.emitSvelteElement(node),
+            .svelte_boundary => try self.emitSvelteBoundary(node),
             else => {},
         }
     }
@@ -367,24 +368,92 @@ pub const DomTemplate = struct {
             },
             .bind => {
                 try self.buf.writeIndent();
-                try self.buf.write("$.bind_");
-                try self.buf.write(dir.name);
-                try self.buf.write("($$n_");
-                try self.buf.writeNumber(element_id);
-                if (dir.expression) |expr| {
-                    try self.buf.write(", () => ");
-                    try self.emitExpression(expr);
-                    try self.buf.write(", v => ");
-                    try self.emitExpression(expr);
-                    try self.buf.write(" = v");
+                // Special handling for bind:group
+                if (std.mem.eql(u8, dir.name, "group")) {
+                    try self.buf.write("$.bind_group($$n_");
+                    try self.buf.writeNumber(element_id);
+                    if (dir.expression) |expr| {
+                        try self.buf.write(", () => ");
+                        try self.emitExpression(expr);
+                        try self.buf.write(", v => ");
+                        try self.emitExpression(expr);
+                        try self.buf.write(" = v");
+                    }
+                    try self.buf.writeLine(");");
+                } else if (std.mem.eql(u8, dir.name, "this")) {
+                    // bind:this for element references
+                    try self.buf.write("$.bind_this($$n_");
+                    try self.buf.writeNumber(element_id);
+                    if (dir.expression) |expr| {
+                        try self.buf.write(", v => ");
+                        try self.emitExpression(expr);
+                        try self.buf.write(" = v");
+                    }
+                    try self.buf.writeLine(");");
+                } else if (isMediaBinding(dir.name)) {
+                    // Media element bindings (video/audio)
+                    if (isReadonlyMediaBinding(dir.name)) {
+                        // Readonly bindings only update the variable from element
+                        try self.buf.write("$.bind_media_readonly($$n_");
+                        try self.buf.writeNumber(element_id);
+                        try self.buf.write(", \"");
+                        try self.buf.write(dir.name);
+                        try self.buf.write("\"");
+                        if (dir.expression) |expr| {
+                            try self.buf.write(", v => ");
+                            try self.emitExpression(expr);
+                            try self.buf.write(" = v");
+                        }
+                        try self.buf.writeLine(");");
+                    } else {
+                        // Writable media bindings (currentTime, paused, volume, etc)
+                        try self.buf.write("$.bind_media($$n_");
+                        try self.buf.writeNumber(element_id);
+                        try self.buf.write(", \"");
+                        try self.buf.write(dir.name);
+                        try self.buf.write("\"");
+                        if (dir.expression) |expr| {
+                            try self.buf.write(", () => ");
+                            try self.emitExpression(expr);
+                            try self.buf.write(", v => ");
+                            try self.emitExpression(expr);
+                            try self.buf.write(" = v");
+                        }
+                        try self.buf.writeLine(");");
+                    }
+                } else if (isDimensionBinding(dir.name)) {
+                    // Dimension bindings (clientWidth, clientHeight, etc) - readonly
+                    try self.buf.write("$.bind_dimension($$n_");
+                    try self.buf.writeNumber(element_id);
+                    try self.buf.write(", \"");
+                    try self.buf.write(dir.name);
+                    try self.buf.write("\"");
+                    if (dir.expression) |expr| {
+                        try self.buf.write(", v => ");
+                        try self.emitExpression(expr);
+                        try self.buf.write(" = v");
+                    }
+                    try self.buf.writeLine(");");
                 } else {
-                    try self.buf.write(", () => ");
+                    try self.buf.write("$.bind_");
                     try self.buf.write(dir.name);
-                    try self.buf.write(", v => ");
-                    try self.buf.write(dir.name);
-                    try self.buf.write(" = v");
+                    try self.buf.write("($$n_");
+                    try self.buf.writeNumber(element_id);
+                    if (dir.expression) |expr| {
+                        try self.buf.write(", () => ");
+                        try self.emitExpression(expr);
+                        try self.buf.write(", v => ");
+                        try self.emitExpression(expr);
+                        try self.buf.write(" = v");
+                    } else {
+                        try self.buf.write(", () => ");
+                        try self.buf.write(dir.name);
+                        try self.buf.write(", v => ");
+                        try self.buf.write(dir.name);
+                        try self.buf.write(" = v");
+                    }
+                    try self.buf.writeLine(");");
                 }
-                try self.buf.writeLine(");");
             },
             .class_directive => {
                 try self.buf.writeIndent();
@@ -771,11 +840,19 @@ pub const DomTemplate = struct {
                 const m = node.data.member_expr;
                 try self.emitExpression(m.object);
                 if (m.computed) {
-                    try self.buf.write("[");
+                    if (m.optional) {
+                        try self.buf.write("?.[");
+                    } else {
+                        try self.buf.write("[");
+                    }
                     try self.emitExpression(m.property);
                     try self.buf.write("]");
                 } else {
-                    try self.buf.write(".");
+                    if (m.optional) {
+                        try self.buf.write("?.");
+                    } else {
+                        try self.buf.write(".");
+                    }
                     try self.emitExpression(m.property);
                 }
             },
@@ -1012,4 +1089,122 @@ pub const DomTemplate = struct {
         try self.buf.writeNumber(id);
         try self.buf.writeLine(");");
     }
+
+    fn emitSvelteBoundary(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        const boundary = node.data.svelte_boundary;
+
+        // Find onerror handler from attributes
+        var onerror_expr: ?*ast.Node = null;
+        for (boundary.attributes.items) |attr| {
+            if (attr.node_type == .attribute) {
+                const a = attr.data.attribute;
+                if (std.mem.eql(u8, a.name, "onerror")) {
+                    switch (a.value) {
+                        .expression => |expr| onerror_expr = expr,
+                        else => {},
+                    }
+                }
+            }
+        }
+
+        try self.buf.writeIndent();
+        try self.buf.writeLine("$.boundary($$anchor, {");
+        self.buf.indent_level += 1;
+
+        // Emit onerror handler if present
+        if (onerror_expr) |expr| {
+            try self.buf.writeIndent();
+            try self.buf.write("onerror: ");
+            try self.emitExpression(expr);
+            try self.buf.writeLine(",");
+        }
+
+        // Emit failed snippet if present
+        if (boundary.failed) |failed| {
+            try self.buf.writeIndent();
+            try self.buf.writeLine("failed: ($$anchor, error, reset) => {");
+            self.buf.indent_level += 1;
+            const snippet = failed.data.snippet_block;
+            try self.emitNode(snippet.body);
+            self.buf.indent_level -= 1;
+            try self.buf.writeIndent();
+            try self.buf.writeLine("},");
+        }
+
+        // Emit children
+        try self.buf.writeIndent();
+        try self.buf.writeLine("children: ($$anchor) => {");
+        self.buf.indent_level += 1;
+        for (boundary.children.items) |child| {
+            try self.emitNode(child);
+        }
+        self.buf.indent_level -= 1;
+        try self.buf.writeIndent();
+        try self.buf.writeLine("}");
+
+        self.buf.indent_level -= 1;
+        try self.buf.writeIndent();
+        try self.buf.writeLine("});");
+    }
 };
+
+// Helper functions for binding type detection
+
+fn isMediaBinding(name: []const u8) bool {
+    const media_bindings = [_][]const u8{
+        "currentTime",
+        "duration",
+        "paused",
+        "volume",
+        "muted",
+        "playbackRate",
+        "seeking",
+        "ended",
+        "buffered",
+        "played",
+        "seekable",
+        "readyState",
+        "videoWidth",
+        "videoHeight",
+    };
+    for (media_bindings) |binding| {
+        if (std.mem.eql(u8, name, binding)) return true;
+    }
+    return false;
+}
+
+fn isReadonlyMediaBinding(name: []const u8) bool {
+    // These media bindings are readonly (cannot be set by the user)
+    const readonly_bindings = [_][]const u8{
+        "duration",
+        "seeking",
+        "ended",
+        "buffered",
+        "played",
+        "seekable",
+        "readyState",
+        "videoWidth",
+        "videoHeight",
+    };
+    for (readonly_bindings) |binding| {
+        if (std.mem.eql(u8, name, binding)) return true;
+    }
+    return false;
+}
+
+fn isDimensionBinding(name: []const u8) bool {
+    const dimension_bindings = [_][]const u8{
+        "clientWidth",
+        "clientHeight",
+        "offsetWidth",
+        "offsetHeight",
+        "contentRect",
+        "contentBoxSize",
+        "borderBoxSize",
+        "devicePixelContentBoxSize",
+    };
+    for (dimension_bindings) |binding| {
+        if (std.mem.eql(u8, name, binding)) return true;
+    }
+    return false;
+}

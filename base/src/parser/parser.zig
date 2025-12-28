@@ -430,6 +430,29 @@ pub const Parser = struct {
                 },
             };
             return ast.createNode(self.allocator, .svelte_element, ast.defaultSpan(), data);
+        } else if (std.mem.eql(u8, name, "svelte:boundary")) {
+            // Find failed snippet in children
+            var failed_snippet: ?*ast.Node = null;
+            var regular_children = std.ArrayList(*ast.Node).init(self.allocator);
+            for (children.items) |child| {
+                if (child.node_type == .snippet_block) {
+                    const snippet = child.data.snippet_block;
+                    if (std.mem.eql(u8, snippet.name, "failed")) {
+                        failed_snippet = child;
+                        continue;
+                    }
+                }
+                try regular_children.append(child);
+            }
+            const data = ast.NodeData{
+                .svelte_boundary = .{
+                    .attributes = attributes,
+                    .children = regular_children,
+                    .failed = failed_snippet,
+                    .pending = null,
+                },
+            };
+            return ast.createNode(self.allocator, .svelte_boundary, ast.defaultSpan(), data);
         } else {
             const data = ast.NodeData{
                 .element = .{
@@ -1176,7 +1199,7 @@ pub const Parser = struct {
         var left = try self.parseAnd();
 
         self.skipWhitespace();
-        while (self.check(.or_op)) {
+        while (self.check(.or_op) or self.check(.nullish_coalesce)) {
             const op = self.advance().value;
             self.skipWhitespace();
             const right = try self.parseAnd();
@@ -1387,7 +1410,8 @@ pub const Parser = struct {
         }
 
         while (true) {
-            if (self.check(.dot)) {
+            const is_optional = self.check(.optional_chain);
+            if (self.check(.dot) or is_optional) {
                 _ = self.advance();
                 if (self.check(.identifier)) {
                     const property_token = self.advance();
@@ -1408,6 +1432,7 @@ pub const Parser = struct {
                             .object = expr,
                             .property = property,
                             .computed = false,
+                            .optional = is_optional,
                         },
                     };
 
