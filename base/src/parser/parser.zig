@@ -782,6 +782,10 @@ pub const Parser = struct {
 
         const body = try self.parseFragment();
 
+        if (self.check(.block_close)) {
+            _ = self.advance();
+        }
+
         const key_data = ast.NodeData{
             .key_block = .{
                 .expression = key_expr,
@@ -1017,7 +1021,31 @@ pub const Parser = struct {
     }
 
     fn parseExpression(self: *Self) ParseError!*ast.Node {
-        return self.parseConditional();
+        var left = try self.parseConditional();
+
+        self.skipWhitespace();
+        if (self.check(.assign)) {
+            const op = self.advance().value;
+            self.skipWhitespace();
+            const right = try self.parseExpression();
+
+            const assign_data = ast.NodeData{
+                .assignment_expr = .{
+                    .operator = op,
+                    .left = left,
+                    .right = right,
+                },
+            };
+
+            return ast.createNode(
+                self.allocator,
+                .assignment_expr,
+                ast.defaultSpan(),
+                assign_data,
+            );
+        }
+
+        return left;
     }
 
     fn parseConditional(self: *Self) ParseError!*ast.Node {
@@ -1359,11 +1387,20 @@ pub const Parser = struct {
         const token = self.peek();
 
         switch (token.type) {
-            .identifier => {
+            .identifier, .kw_html, .kw_const, .kw_debug, .kw_render, .kw_key, .kw_snippet => {
                 _ = self.advance();
+                const name = if (token.type == .identifier) token.value else switch (token.type) {
+                    .kw_html => "html",
+                    .kw_const => "const",
+                    .kw_debug => "debug",
+                    .kw_render => "render",
+                    .kw_key => "key",
+                    .kw_snippet => "snippet",
+                    else => token.value,
+                };
                 const id_data = ast.NodeData{
                     .identifier_expr = .{
-                        .name = token.value,
+                        .name = name,
                     },
                 };
                 return ast.createNode(

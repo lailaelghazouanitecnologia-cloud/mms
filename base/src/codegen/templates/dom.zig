@@ -175,6 +175,8 @@ pub const DomTemplate = struct {
             .snippet_block => try self.emitSnippet(node),
             .html_tag => try self.emitHtmlTag(node),
             .render_tag => try self.emitRenderTag(node),
+            .const_tag => try self.emitConstTag(node),
+            .debug_tag => try self.emitDebugTag(node),
             else => {},
         }
     }
@@ -715,6 +717,29 @@ pub const DomTemplate = struct {
         }
     }
 
+    fn emitConstTag(self: *Self, node: *ast.Node) !void {
+        const const_tag = node.data.const_tag;
+        try self.buf.writeIndent();
+        try self.buf.write("const ");
+        try self.emitExpression(const_tag.declaration);
+        try self.buf.writeLine(";");
+    }
+
+    fn emitDebugTag(self: *Self, node: *ast.Node) !void {
+        const debug_tag = node.data.debug_tag;
+        try self.buf.writeIndent();
+        try self.buf.write("console.log(");
+        for (debug_tag.identifiers.items, 0..) |ident, i| {
+            if (i > 0) try self.buf.write(", ");
+            try self.buf.write("{");
+            try self.emitExpression(ident);
+            try self.buf.write(": ");
+            try self.emitExpression(ident);
+            try self.buf.write("}");
+        }
+        try self.buf.writeLine(");");
+    }
+
     pub fn emitExpression(self: *Self, node: *ast.Node) !void {
         switch (node.node_type) {
             .identifier_expr => try self.buf.write(node.data.identifier_expr.name),
@@ -820,6 +845,14 @@ pub const DomTemplate = struct {
                     try self.emitExpression(upd.argument);
                     try self.buf.write(upd.operator);
                 }
+            },
+            .assignment_expr => {
+                const assign = node.data.assignment_expr;
+                try self.emitExpression(assign.left);
+                try self.buf.write(" ");
+                try self.buf.write(assign.operator);
+                try self.buf.write(" ");
+                try self.emitExpression(assign.right);
             },
             else => {},
         }

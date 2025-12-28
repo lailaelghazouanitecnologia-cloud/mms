@@ -129,6 +129,8 @@ pub const SsrTemplate = struct {
             return;
         } else if (std.mem.startsWith(u8, line, "});")) {
             return;
+        } else if (std.mem.eql(u8, line, "]);")) {
+            try self.buf.write("];");
         } else {
             try self.buf.write(line);
         }
@@ -150,6 +152,8 @@ pub const SsrTemplate = struct {
             .each_block => try self.emitEachBlock(node),
             .await_block => try self.emitAwaitBlock(node),
             .html_tag => try self.emitHtmlTag(node),
+            .const_tag => try self.emitConstTag(node),
+            .debug_tag => try self.emitDebugTag(node),
             else => {},
         }
     }
@@ -362,6 +366,7 @@ pub const SsrTemplate = struct {
 
     fn emitEachBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
         const each = node.data.each_block;
+        const has_const = self.hasConstTag(each.children.items);
 
         try self.buf.write("${");
         try self.emitExpression(each.expression);
@@ -371,13 +376,44 @@ pub const SsrTemplate = struct {
             try self.buf.write(", ");
             try self.buf.write(idx);
         }
-        try self.buf.write(") => `");
 
-        for (each.children.items) |child| {
-            try self.emitTemplate(child);
+        if (has_const) {
+            try self.buf.write(") => {\n");
+            self.buf.indent();
+            for (each.children.items) |child| {
+                if (child.node_type == .const_tag) {
+                    try self.buf.writeIndent();
+                    try self.buf.write("const ");
+                    try self.emitExpression(child.data.const_tag.declaration);
+                    try self.buf.writeLine(";");
+                }
+            }
+            try self.buf.writeIndent();
+            try self.buf.write("return `");
+            for (each.children.items) |child| {
+                if (child.node_type != .const_tag and child.node_type != .debug_tag) {
+                    try self.emitTemplate(child);
+                }
+            }
+            try self.buf.writeLine("`;");
+            self.buf.dedent();
+            try self.buf.writeIndent();
+            try self.buf.write("}).join('')}");
+        } else {
+            try self.buf.write(") => `");
+            for (each.children.items) |child| {
+                try self.emitTemplate(child);
+            }
+            try self.buf.write("`).join('')}");
         }
+    }
 
-        try self.buf.write("`).join('')}");
+    fn hasConstTag(self: *Self, children: []*ast.Node) bool {
+        _ = self;
+        for (children) |child| {
+            if (child.node_type == .const_tag) return true;
+        }
+        return false;
     }
 
     fn emitAwaitBlock(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
@@ -393,6 +429,22 @@ pub const SsrTemplate = struct {
         try self.buf.write("${");
         try self.emitExpression(html_tag.expression);
         try self.buf.write("}");
+    }
+
+    fn emitConstTag(self: *Self, node: *ast.Node) !void {
+        const const_tag = node.data.const_tag;
+        try self.buf.write("`;\n");
+        try self.buf.writeIndent();
+        try self.buf.write("const ");
+        try self.emitExpression(const_tag.declaration);
+        try self.buf.writeLine(";");
+        try self.buf.writeIndent();
+        try self.buf.write("$$payload.out += `");
+    }
+
+    fn emitDebugTag(self: *Self, node: *ast.Node) !void {
+        _ = self;
+        _ = node;
     }
 
     fn emitExpression(self: *Self, node: *ast.Node) !void {
@@ -462,6 +514,14 @@ pub const SsrTemplate = struct {
                     try self.emitExpression(upd.argument);
                     try self.buf.write(upd.operator);
                 }
+            },
+            .assignment_expr => {
+                const assign = node.data.assignment_expr;
+                try self.emitExpression(assign.left);
+                try self.buf.write(" ");
+                try self.buf.write(assign.operator);
+                try self.buf.write(" ");
+                try self.emitExpression(assign.right);
             },
             else => {},
         }
