@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast = @import("../../ast/nodes.zig");
 const buffer = @import("../../utils/buffer.zig");
+const bindings = @import("../helpers/bindings.zig");
 
 pub const DomTemplate = struct {
     buf: buffer.WriteBuffer,
@@ -367,93 +368,7 @@ pub const DomTemplate = struct {
                 try self.buf.writeLine(");");
             },
             .bind => {
-                try self.buf.writeIndent();
-                // Special handling for bind:group
-                if (std.mem.eql(u8, dir.name, "group")) {
-                    try self.buf.write("$.bind_group($$n_");
-                    try self.buf.writeNumber(element_id);
-                    if (dir.expression) |expr| {
-                        try self.buf.write(", () => ");
-                        try self.emitExpression(expr);
-                        try self.buf.write(", v => ");
-                        try self.emitExpression(expr);
-                        try self.buf.write(" = v");
-                    }
-                    try self.buf.writeLine(");");
-                } else if (std.mem.eql(u8, dir.name, "this")) {
-                    // bind:this for element references
-                    try self.buf.write("$.bind_this($$n_");
-                    try self.buf.writeNumber(element_id);
-                    if (dir.expression) |expr| {
-                        try self.buf.write(", v => ");
-                        try self.emitExpression(expr);
-                        try self.buf.write(" = v");
-                    }
-                    try self.buf.writeLine(");");
-                } else if (isMediaBinding(dir.name)) {
-                    // Media element bindings (video/audio)
-                    if (isReadonlyMediaBinding(dir.name)) {
-                        // Readonly bindings only update the variable from element
-                        try self.buf.write("$.bind_media_readonly($$n_");
-                        try self.buf.writeNumber(element_id);
-                        try self.buf.write(", \"");
-                        try self.buf.write(dir.name);
-                        try self.buf.write("\"");
-                        if (dir.expression) |expr| {
-                            try self.buf.write(", v => ");
-                            try self.emitExpression(expr);
-                            try self.buf.write(" = v");
-                        }
-                        try self.buf.writeLine(");");
-                    } else {
-                        // Writable media bindings (currentTime, paused, volume, etc)
-                        try self.buf.write("$.bind_media($$n_");
-                        try self.buf.writeNumber(element_id);
-                        try self.buf.write(", \"");
-                        try self.buf.write(dir.name);
-                        try self.buf.write("\"");
-                        if (dir.expression) |expr| {
-                            try self.buf.write(", () => ");
-                            try self.emitExpression(expr);
-                            try self.buf.write(", v => ");
-                            try self.emitExpression(expr);
-                            try self.buf.write(" = v");
-                        }
-                        try self.buf.writeLine(");");
-                    }
-                } else if (isDimensionBinding(dir.name)) {
-                    // Dimension bindings (clientWidth, clientHeight, etc) - readonly
-                    try self.buf.write("$.bind_dimension($$n_");
-                    try self.buf.writeNumber(element_id);
-                    try self.buf.write(", \"");
-                    try self.buf.write(dir.name);
-                    try self.buf.write("\"");
-                    if (dir.expression) |expr| {
-                        try self.buf.write(", v => ");
-                        try self.emitExpression(expr);
-                        try self.buf.write(" = v");
-                    }
-                    try self.buf.writeLine(");");
-                } else {
-                    try self.buf.write("$.bind_");
-                    try self.buf.write(dir.name);
-                    try self.buf.write("($$n_");
-                    try self.buf.writeNumber(element_id);
-                    if (dir.expression) |expr| {
-                        try self.buf.write(", () => ");
-                        try self.emitExpression(expr);
-                        try self.buf.write(", v => ");
-                        try self.emitExpression(expr);
-                        try self.buf.write(" = v");
-                    } else {
-                        try self.buf.write(", () => ");
-                        try self.buf.write(dir.name);
-                        try self.buf.write(", v => ");
-                        try self.buf.write(dir.name);
-                        try self.buf.write(" = v");
-                    }
-                    try self.buf.writeLine(");");
-                }
+                try self.emitBindDirective(dir, element_id);
             },
             .class_directive => {
                 try self.buf.writeIndent();
@@ -1146,65 +1061,94 @@ pub const DomTemplate = struct {
         try self.buf.writeIndent();
         try self.buf.writeLine("});");
     }
+
+    /// Emit bind directive using centralized binding helpers
+    fn emitBindDirective(self: *Self, dir: ast.DirectiveNode, element_id: u32) !void {
+        try self.buf.writeIndent();
+
+        const category = bindings.getBindingCategory(dir.name);
+        switch (category) {
+            .group => {
+                try self.buf.write(bindings.RuntimeBindings.group);
+                try self.buf.write("($$n_");
+                try self.buf.writeNumber(element_id);
+                if (dir.expression) |expr| {
+                    try self.emitGetterSetter(expr);
+                }
+                try self.buf.writeLine(");");
+            },
+            .this_ref => {
+                try self.buf.write(bindings.RuntimeBindings.this_ref);
+                try self.buf.write("($$n_");
+                try self.buf.writeNumber(element_id);
+                if (dir.expression) |expr| {
+                    try self.emitSetter(expr);
+                }
+                try self.buf.writeLine(");");
+            },
+            .media_readonly, .dimension => {
+                const fn_name = if (category == .media_readonly)
+                    bindings.RuntimeBindings.media_readonly
+                else
+                    bindings.RuntimeBindings.dimension;
+                try self.buf.write(fn_name);
+                try self.buf.write("($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.emitBindingName(dir.name);
+                if (dir.expression) |expr| {
+                    try self.emitSetter(expr);
+                }
+                try self.buf.writeLine(");");
+            },
+            .media_writable => {
+                try self.buf.write(bindings.RuntimeBindings.media);
+                try self.buf.write("($$n_");
+                try self.buf.writeNumber(element_id);
+                try self.emitBindingName(dir.name);
+                if (dir.expression) |expr| {
+                    try self.emitGetterSetter(expr);
+                }
+                try self.buf.writeLine(");");
+            },
+            .standard => {
+                try self.buf.write("$.bind_");
+                try self.buf.write(dir.name);
+                try self.buf.write("($$n_");
+                try self.buf.writeNumber(element_id);
+                if (dir.expression) |expr| {
+                    try self.emitGetterSetter(expr);
+                } else {
+                    try self.buf.write(", () => ");
+                    try self.buf.write(dir.name);
+                    try self.buf.write(", v => ");
+                    try self.buf.write(dir.name);
+                    try self.buf.write(" = v");
+                }
+                try self.buf.writeLine(");");
+            },
+        }
+    }
+
+    /// Emit ", () => expr, v => expr = v"
+    fn emitGetterSetter(self: *Self, expr: *ast.Node) !void {
+        try self.buf.write(", () => ");
+        try self.emitExpression(expr);
+        try self.buf.write(", v => ");
+        try self.emitExpression(expr);
+        try self.buf.write(" = v");
+    }
+
+    /// Emit ", v => expr = v"
+    fn emitSetter(self: *Self, expr: *ast.Node) !void {
+        try self.buf.write(", v => ");
+        try self.emitExpression(expr);
+        try self.buf.write(" = v");
+    }
+
+    /// Emit ", \"name\""
+    fn emitBindingName(self: *Self, name: []const u8) !void {
+        try self.buf.write(", \"");
+        try self.buf.write(name);
+        try self.buf.write("\"");
+    }
 };
-
-// Helper functions for binding type detection
-
-fn isMediaBinding(name: []const u8) bool {
-    const media_bindings = [_][]const u8{
-        "currentTime",
-        "duration",
-        "paused",
-        "volume",
-        "muted",
-        "playbackRate",
-        "seeking",
-        "ended",
-        "buffered",
-        "played",
-        "seekable",
-        "readyState",
-        "videoWidth",
-        "videoHeight",
-    };
-    for (media_bindings) |binding| {
-        if (std.mem.eql(u8, name, binding)) return true;
-    }
-    return false;
-}
-
-fn isReadonlyMediaBinding(name: []const u8) bool {
-    // These media bindings are readonly (cannot be set by the user)
-    const readonly_bindings = [_][]const u8{
-        "duration",
-        "seeking",
-        "ended",
-        "buffered",
-        "played",
-        "seekable",
-        "readyState",
-        "videoWidth",
-        "videoHeight",
-    };
-    for (readonly_bindings) |binding| {
-        if (std.mem.eql(u8, name, binding)) return true;
-    }
-    return false;
-}
-
-fn isDimensionBinding(name: []const u8) bool {
-    const dimension_bindings = [_][]const u8{
-        "clientWidth",
-        "clientHeight",
-        "offsetWidth",
-        "offsetHeight",
-        "contentRect",
-        "contentBoxSize",
-        "borderBoxSize",
-        "devicePixelContentBoxSize",
-    };
-    for (dimension_bindings) |binding| {
-        if (std.mem.eql(u8, name, binding)) return true;
-    }
-    return false;
-}
