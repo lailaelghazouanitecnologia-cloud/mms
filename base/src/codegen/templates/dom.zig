@@ -177,6 +177,11 @@ pub const DomTemplate = struct {
             .render_tag => try self.emitRenderTag(node),
             .const_tag => try self.emitConstTag(node),
             .debug_tag => try self.emitDebugTag(node),
+            .svelte_head => try self.emitSvelteHead(node),
+            .svelte_window => try self.emitSvelteWindow(node),
+            .svelte_body => try self.emitSvelteBody(node),
+            .svelte_document => try self.emitSvelteDocument(node),
+            .svelte_element => try self.emitSvelteElement(node),
             else => {},
         }
     }
@@ -371,6 +376,12 @@ pub const DomTemplate = struct {
                     try self.emitExpression(expr);
                     try self.buf.write(", v => ");
                     try self.emitExpression(expr);
+                    try self.buf.write(" = v");
+                } else {
+                    try self.buf.write(", () => ");
+                    try self.buf.write(dir.name);
+                    try self.buf.write(", v => ");
+                    try self.buf.write(dir.name);
                     try self.buf.write(" = v");
                 }
                 try self.buf.writeLine(");");
@@ -780,13 +791,19 @@ pub const DomTemplate = struct {
             },
             .binary_expr => {
                 const b = node.data.binary_expr;
-                try self.buf.write("(");
-                try self.emitExpression(b.left);
-                try self.buf.write(" ");
-                try self.buf.write(b.operator);
-                try self.buf.write(" ");
-                try self.emitExpression(b.right);
-                try self.buf.write(")");
+                if (std.mem.eql(u8, b.operator, ":")) {
+                    try self.emitExpression(b.left);
+                    try self.buf.write(": ");
+                    try self.emitExpression(b.right);
+                } else {
+                    try self.buf.write("(");
+                    try self.emitExpression(b.left);
+                    try self.buf.write(" ");
+                    try self.buf.write(b.operator);
+                    try self.buf.write(" ");
+                    try self.emitExpression(b.right);
+                    try self.buf.write(")");
+                }
             },
             .unary_expr => {
                 const u = node.data.unary_expr;
@@ -856,5 +873,143 @@ pub const DomTemplate = struct {
             },
             else => {},
         }
+    }
+
+    fn emitSvelteHead(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        const head = node.data.svelte_head;
+        try self.buf.writeIndent();
+        try self.buf.writeLine("$.head($$anchor, () => {");
+        self.buf.indent_level += 1;
+        for (head.children.items) |child| {
+            try self.emitNode(child);
+        }
+        self.buf.indent_level -= 1;
+        try self.buf.writeIndent();
+        try self.buf.writeLine("});");
+    }
+
+    fn emitSvelteWindow(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        const window = node.data.svelte_window;
+        for (window.attributes.items) |attr| {
+            if (attr.node_type == .directive) {
+                const dir = attr.data.directive;
+                if (dir.directive_type == .on) {
+                    try self.buf.writeIndent();
+                    try self.buf.write("$.on(window, \"");
+                    try self.buf.write(dir.name);
+                    try self.buf.write("\", ");
+                    if (dir.expression) |expr| {
+                        try self.emitExpression(expr);
+                    }
+                    try self.buf.writeLine(");");
+                } else if (dir.directive_type == .bind) {
+                    try self.buf.writeIndent();
+                    try self.buf.write("$.bind_");
+                    try self.buf.write(dir.name);
+                    try self.buf.write("(window, () => ");
+                    if (dir.expression) |expr| {
+                        try self.emitExpression(expr);
+                        try self.buf.write(", v => ");
+                        try self.emitExpression(expr);
+                        try self.buf.write(" = v");
+                    } else {
+                        try self.buf.write(dir.name);
+                        try self.buf.write(", v => ");
+                        try self.buf.write(dir.name);
+                        try self.buf.write(" = v");
+                    }
+                    try self.buf.writeLine(");");
+                }
+            }
+        }
+    }
+
+    fn emitSvelteBody(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        const body = node.data.svelte_body;
+        for (body.attributes.items) |attr| {
+            if (attr.node_type == .directive) {
+                const dir = attr.data.directive;
+                if (dir.directive_type == .on) {
+                    try self.buf.writeIndent();
+                    try self.buf.write("$.on(document.body, \"");
+                    try self.buf.write(dir.name);
+                    try self.buf.write("\", ");
+                    if (dir.expression) |expr| {
+                        try self.emitExpression(expr);
+                    }
+                    try self.buf.writeLine(");");
+                }
+            }
+        }
+    }
+
+    fn emitSvelteDocument(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        const doc = node.data.svelte_document;
+        for (doc.attributes.items) |attr| {
+            if (attr.node_type == .directive) {
+                const dir = attr.data.directive;
+                if (dir.directive_type == .on) {
+                    try self.buf.writeIndent();
+                    try self.buf.write("$.on(document, \"");
+                    try self.buf.write(dir.name);
+                    try self.buf.write("\", ");
+                    if (dir.expression) |expr| {
+                        try self.emitExpression(expr);
+                    }
+                    try self.buf.writeLine(");");
+                }
+            }
+        }
+    }
+
+    fn emitSvelteElement(self: *Self, node: *ast.Node) std.mem.Allocator.Error!void {
+        const elem = node.data.svelte_element;
+        const id = self.template_count;
+        self.template_count += 1;
+
+        // Emit dynamic element creation
+        try self.buf.writeIndent();
+        try self.buf.write("var $$n_");
+        try self.buf.writeNumber(id);
+        try self.buf.write(" = $.element($$anchor, ");
+        try self.emitExpression(elem.tag);
+        try self.buf.writeLine(");");
+
+        // Emit attributes
+        for (elem.attributes.items) |attr| {
+            if (attr.node_type == .attribute) {
+                const a = attr.data.attribute;
+                if (std.mem.eql(u8, a.name, "this")) continue; // Skip the 'this' attribute
+                try self.buf.writeIndent();
+                try self.buf.write("$.attr($$n_");
+                try self.buf.writeNumber(id);
+                try self.buf.write(", \"");
+                try self.buf.write(a.name);
+                try self.buf.write("\", ");
+                switch (a.value) {
+                    .text => |t| {
+                        try self.buf.write("\"");
+                        try self.buf.write(t);
+                        try self.buf.write("\"");
+                    },
+                    .expression => |expr| try self.emitExpression(expr),
+                    .boolean => try self.buf.write("true"),
+                    .concat => try self.buf.write("\"\""),
+                }
+                try self.buf.writeLine(");");
+            } else if (attr.node_type == .directive) {
+                try self.emitDirective(attr, id);
+            }
+        }
+
+        // Emit children
+        for (elem.children.items) |child| {
+            try self.emitNode(child);
+        }
+
+        try self.buf.writeIndent();
+        try self.buf.write("$.close($$anchor, $$n_");
+        try self.buf.writeNumber(id);
+        try self.buf.writeLine(");");
     }
 };

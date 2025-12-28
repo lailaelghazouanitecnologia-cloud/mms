@@ -13,6 +13,7 @@ pub const Lexer = struct {
     in_mustache: bool,
     in_script: bool,
     in_style: bool,
+    brace_depth: u32,
 
     const Self = @This();
 
@@ -29,6 +30,7 @@ pub const Lexer = struct {
             .in_mustache = false,
             .in_script = false,
             .in_style = false,
+            .brace_depth = 0,
         };
     }
 
@@ -137,6 +139,13 @@ pub const Lexer = struct {
                     try self.scanBlockContinue(start_pos);
                 } else if (self.match('@')) {
                     try self.scanSpecialTag(start_pos);
+                } else if (self.in_mustache) {
+                    self.brace_depth += 1;
+                    try self.tokens.append(.{
+                        .type = .lbrace,
+                        .value = "{",
+                        .span = self.makeSpan(start_pos, self.pos),
+                    });
                 } else {
                     self.in_mustache = true;
                     try self.tokens.append(.{
@@ -147,12 +156,21 @@ pub const Lexer = struct {
                 }
             },
             '}' => {
-                self.in_mustache = false;
-                try self.tokens.append(.{
-                    .type = .mustache_close,
-                    .value = "}",
-                    .span = self.makeSpan(start_pos, self.pos),
-                });
+                if (self.brace_depth > 0) {
+                    self.brace_depth -= 1;
+                    try self.tokens.append(.{
+                        .type = .rbrace,
+                        .value = "}",
+                        .span = self.makeSpan(start_pos, self.pos),
+                    });
+                } else {
+                    self.in_mustache = false;
+                    try self.tokens.append(.{
+                        .type = .mustache_close,
+                        .value = "}",
+                        .span = self.makeSpan(start_pos, self.pos),
+                    });
+                }
             },
             '=' => {
                 if (self.match('=')) {
@@ -320,14 +338,22 @@ pub const Lexer = struct {
 
     fn scanIdentifier(self: *Self, start_pos: u32) !void {
         while (isAlphaNumeric(self.peek())) _ = self.advance();
-        const value = self.source[start_pos..self.pos];
-        const token_type = self.identifierType(value);
+        var value = self.source[start_pos..self.pos];
+        var token_type = self.identifierType(value);
         if (self.in_tag and self.peek() == ':') {
-            _ = self.advance();
-            const directive_type = self.directiveType(value);
-            if (directive_type) |dt| {
-                try self.tokens.append(.{ .type = dt, .value = value, .span = self.makeSpan(start_pos, self.pos) });
-                return;
+            // Check for svelte:* special elements
+            if (std.mem.eql(u8, value, "svelte")) {
+                _ = self.advance(); // consume :
+                while (isAlphaNumeric(self.peek())) _ = self.advance();
+                value = self.source[start_pos..self.pos];
+                token_type = .identifier;
+            } else {
+                _ = self.advance();
+                const directive_type = self.directiveType(value);
+                if (directive_type) |dt| {
+                    try self.tokens.append(.{ .type = dt, .value = value, .span = self.makeSpan(start_pos, self.pos) });
+                    return;
+                }
             }
         }
         try self.tokens.append(.{ .type = token_type, .value = value, .span = self.makeSpan(start_pos, self.pos) });

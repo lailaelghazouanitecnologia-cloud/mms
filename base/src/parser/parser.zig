@@ -403,6 +403,33 @@ pub const Parser = struct {
                 },
             };
             return ast.createNode(self.allocator, .svelte_self, ast.defaultSpan(), data);
+        } else if (std.mem.eql(u8, name, "svelte:element")) {
+            // Find the "this" attribute for the dynamic tag
+            var tag_expr: ?*ast.Node = null;
+            for (attributes.items) |attr| {
+                if (attr.node_type == .attribute) {
+                    const a = attr.data.attribute;
+                    if (std.mem.eql(u8, a.name, "this")) {
+                        switch (a.value) {
+                            .expression => |expr| tag_expr = expr,
+                            .text => |t| {
+                                const lit_data = ast.NodeData{ .literal_expr = .{ .value = .{ .string = t }, .raw = t } };
+                                tag_expr = ast.createNode(self.allocator, .literal_expr, ast.defaultSpan(), lit_data) catch null;
+                            },
+                            .boolean, .concat => {},
+                        }
+                    }
+                }
+            }
+            const dummy_data = ast.NodeData{ .literal_expr = .{ .value = .{ .string = "div" }, .raw = "div" } };
+            const data = ast.NodeData{
+                .svelte_element = .{
+                    .tag = tag_expr orelse (ast.createNode(self.allocator, .literal_expr, ast.defaultSpan(), dummy_data) catch unreachable),
+                    .attributes = attributes,
+                    .children = children,
+                },
+            };
+            return ast.createNode(self.allocator, .svelte_element, ast.defaultSpan(), data);
         } else {
             const data = ast.NodeData{
                 .element = .{
@@ -577,13 +604,54 @@ pub const Parser = struct {
             _ = self.advance();
         }
 
+        self.skipWhitespace();
+
         if (self.check(.spread)) {
             _ = self.advance();
+            self.skipWhitespace();
+            const expr = try self.parseExpression();
+
+            if (self.check(.mustache_close)) {
+                _ = self.advance();
+            }
+
+            const spread_data = ast.NodeData{
+                .spread_attribute = .{
+                    .expression = expr,
+                },
+            };
+
+            return ast.createNode(
+                self.allocator,
+                .spread_attribute,
+                ast.defaultSpan(),
+                spread_data,
+            );
         }
 
-        self.skipWhitespace();
-        const expr = try self.parseExpression();
+        if (self.check(.identifier)) {
+            const name_token = self.advance();
+            const name = name_token.value;
 
+            if (self.check(.mustache_close)) {
+                _ = self.advance();
+
+                const id_data = ast.NodeData{
+                    .identifier_expr = .{ .name = name },
+                };
+                const expr = try ast.createNode(self.allocator, .identifier_expr, name_token.span, id_data);
+
+                const attr_data = ast.NodeData{
+                    .attribute = .{
+                        .name = name,
+                        .value = .{ .expression = expr },
+                    },
+                };
+                return ast.createNode(self.allocator, .attribute, ast.defaultSpan(), attr_data);
+            }
+        }
+
+        const expr = try self.parseExpression();
         if (self.check(.mustache_close)) {
             _ = self.advance();
         }
@@ -593,13 +661,7 @@ pub const Parser = struct {
                 .expression = expr,
             },
         };
-
-        return ast.createNode(
-            self.allocator,
-            .spread_attribute,
-            ast.defaultSpan(),
-            spread_data,
-        );
+        return ast.createNode(self.allocator, .spread_attribute, ast.defaultSpan(), spread_data);
     }
 
     fn parseIfBlock(self: *Self) ParseError!*ast.Node {
@@ -1661,16 +1723,32 @@ pub const Parser = struct {
         while (!self.check(.rbrace) and !self.isAtEnd()) {
             self.skipWhitespace();
 
-            if (self.check(.identifier) or self.check(.string)) {
+            if (self.check(.spread)) {
+                _ = self.advance();
+                self.skipWhitespace();
+                const spread_expr = try self.parseExpression();
+                const spread_data = ast.NodeData{
+                    .unary_expr = .{
+                        .operator = "...",
+                        .argument = spread_expr,
+                        .prefix = true,
+                    },
+                };
+                const spread_prop = try ast.createNode(self.allocator, .unary_expr, ast.defaultSpan(), spread_data);
+                try properties.append(spread_prop);
+            } else if (self.check(.identifier) or self.check(.string)) {
                 const key = try self.parsePrimary();
 
                 self.skipWhitespace();
+                var value: *ast.Node = undefined;
+
                 if (self.check(.colon)) {
                     _ = self.advance();
+                    self.skipWhitespace();
+                    value = try self.parseExpression();
+                } else {
+                    value = key;
                 }
-                self.skipWhitespace();
-
-                const value = try self.parseExpression();
 
                 const prop_data = ast.NodeData{
                     .binary_expr = .{
