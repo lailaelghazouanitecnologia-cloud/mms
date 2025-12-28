@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast = @import("../../ast/nodes.zig");
 const buffer = @import("../../utils/buffer.zig");
+const ExpressionEmitter = @import("../helpers/expressions.zig").ExpressionEmitter;
 
 pub const SsrTemplate = struct {
     buf: buffer.WriteBuffer,
@@ -470,84 +471,10 @@ pub const SsrTemplate = struct {
         _ = node;
     }
 
+    /// Emit expression using shared expression emitter
     fn emitExpression(self: *Self, node: *ast.Node) !void {
-        switch (node.node_type) {
-            .identifier_expr => try self.buf.write(node.data.identifier_expr.name),
-            .literal_expr => {
-                const lit = node.data.literal_expr;
-                switch (lit.value) {
-                    .string => |s| {
-                        try self.buf.write("\"");
-                        try self.buf.write(s);
-                        try self.buf.write("\"");
-                    },
-                    .number => |n| try self.buf.writeNumber(n),
-                    .boolean => |b| try self.buf.write(if (b) "true" else "false"),
-                    .null_val => try self.buf.write("null"),
-                }
-            },
-            .member_expr => {
-                const m = node.data.member_expr;
-                try self.emitExpression(m.object);
-                if (m.computed) {
-                    try self.buf.write("[");
-                    try self.emitExpression(m.property);
-                    try self.buf.write("]");
-                } else {
-                    try self.buf.write(".");
-                    try self.emitExpression(m.property);
-                }
-            },
-            .call_expr => {
-                const c = node.data.call_expr;
-                try self.emitExpression(c.callee);
-                try self.buf.write("(");
-                for (c.arguments.items, 0..) |arg, i| {
-                    if (i > 0) try self.buf.write(", ");
-                    try self.emitExpression(arg);
-                }
-                try self.buf.write(")");
-            },
-            .binary_expr => {
-                const b = node.data.binary_expr;
-                try self.buf.write("(");
-                try self.emitExpression(b.left);
-                try self.buf.write(" ");
-                try self.buf.write(b.operator);
-                try self.buf.write(" ");
-                try self.emitExpression(b.right);
-                try self.buf.write(")");
-            },
-            .arrow_expr => {
-                const arrow = node.data.arrow_expr;
-                try self.buf.write("(");
-                for (arrow.params.items, 0..) |param, i| {
-                    if (i > 0) try self.buf.write(", ");
-                    try self.emitExpression(param);
-                }
-                try self.buf.write(") => ");
-                try self.emitExpression(arrow.body);
-            },
-            .update_expr => {
-                const upd = node.data.update_expr;
-                if (upd.prefix) {
-                    try self.buf.write(upd.operator);
-                    try self.emitExpression(upd.argument);
-                } else {
-                    try self.emitExpression(upd.argument);
-                    try self.buf.write(upd.operator);
-                }
-            },
-            .assignment_expr => {
-                const assign = node.data.assignment_expr;
-                try self.emitExpression(assign.left);
-                try self.buf.write(" ");
-                try self.buf.write(assign.operator);
-                try self.buf.write(" ");
-                try self.emitExpression(assign.right);
-            },
-            else => {},
-        }
+        var emitter = ExpressionEmitter.init(&self.buf, self.allocator);
+        try emitter.emit(node);
     }
 
     fn emitEscaped(self: *Self, str: []const u8) !void {
