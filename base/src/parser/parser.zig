@@ -491,7 +491,37 @@ pub const Parser = struct {
         var modifiers = std.ArrayList([]const u8).init(self.allocator);
 
         if (self.check(.identifier)) {
-            name = self.advance().value;
+            var name_parts = std.ArrayList([]const u8).init(self.allocator);
+            try name_parts.append(self.advance().value);
+
+            while (self.check(.minus)) {
+                _ = self.advance();
+                if (self.check(.identifier)) {
+                    try name_parts.append(self.advance().value);
+                }
+            }
+
+            if (name_parts.items.len == 1) {
+                name = name_parts.items[0];
+            } else {
+                var total_len: usize = 0;
+                for (name_parts.items) |part| {
+                    total_len += part.len;
+                }
+                total_len += name_parts.items.len - 1;
+
+                var buf = try self.allocator.alloc(u8, total_len);
+                var pos: usize = 0;
+                for (name_parts.items, 0..) |part, i| {
+                    if (i > 0) {
+                        buf[pos] = '-';
+                        pos += 1;
+                    }
+                    @memcpy(buf[pos .. pos + part.len], part);
+                    pos += part.len;
+                }
+                name = buf;
+            }
 
             while (self.check(.pipe)) {
                 _ = self.advance();
@@ -1273,7 +1303,26 @@ pub const Parser = struct {
     }
 
     fn parsePostfix(self: *Self) ParseError!*ast.Node {
+        self.skipWhitespace();
         var expr = try self.parsePrimary();
+
+        self.skipWhitespace();
+        if (expr.node_type == .identifier_expr and self.check(.arrow)) {
+            _ = self.advance();
+            self.skipWhitespace();
+            const body = try self.parseExpression();
+
+            var params = std.ArrayList(*ast.Node).init(self.allocator);
+            try params.append(expr);
+
+            const arrow_data = ast.NodeData{
+                .arrow_expr = .{
+                    .params = params,
+                    .body = body,
+                },
+            };
+            return ast.createNode(self.allocator, .arrow_expr, ast.defaultSpan(), arrow_data);
+        }
 
         while (true) {
             if (self.check(.dot)) {
